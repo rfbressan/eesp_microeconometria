@@ -1,0 +1,50 @@
+---
+title: "Microeconometrics I"
+subtitle: "Homework I"
+author: 
+  - "Professor: Bruno Ferman"
+  - "Student: Rafael F. Bressan"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    highlight: default
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+Choose a published paper based on a field experiment in which the dataset is available online. Once you decide on your paper, sign up at this link. It must be a different paper for each student.
+
+I have chosen the following paper _"Testing Enforcement Strategies in the Field: Threat, Moral Appeal and Social Information"_ from the Journal of the European Economic Association, by  Gerlinde Fellner, Rupert Sausgruber, and Christian Traxler, published in June 2013 [@Fellner2013].
+
+First a note on why this paper has been chosen. It is in my line of work to understand tax compliance and the motives for avoidance. Field experiments can be used, and indeed they are, as there is abundant literature on this topic, to understand the reasons tax payers have to comply or to defraud (or at least omit themselves) the tax system. Although many journals do not provide open access to published article's data, the journals from the American Economic Association, Econometrica and (I recently discovered) the European Economic Association do provide access to supplementary material, including datasets and code such that other researchers are able to reproduce the results of any published article. I first tried to search papers on the journals from AEA and found some interesting ones [@Naritomi2019; @Dwenger2016; @Luttmer2014], but, even though all these papers were supposed to provide access to their datasets, due to the confidential nature of these data, the authors opted not to provide them. Therefore, I ended up in the Journal of the European Economic Association and found the above paper which, fortunately, had all supplementary material available.
+
+### Briefly summarize the research question in the paper, and why it is interesting. What is the main parameter of interest?
+
+The authors are interested in evaluating several strategies to enforce tax law compliance. Considering the majority of taxes nowadays are the self-reporting type, the tax authority is interested in knowing what does it take for a person or a company to correctly self-report the due tax and pay it. Moreover, if the authority is suspicious of evasion, what is the most effective way to collect the due but unpaid taxes? To answer these questions it important to know what makes the agents correctly report their due taxes, and pay it, but also to understand the methods the authority have to collect from evading agents. Tax audits are expensive, both in terms of wages paid for the tax authority employees and time consumed during an audit. Also, audit are not easily scalable, since every audit has its own nuances. If, for example, a mailing can be sent to potential evaders pointing out the risks associated with non-compliance and it has a deterrent effect, this mailing can be preferred as a first strategy to collect unpaid taxes before a full-blown tax audit be unleashed upon the agent. But the question still remains, what should be the contents of this letter such that people are more susceptible to comply after receiving it?
+
+Therefore, in their study the authors are mainly interested in evaluating the different effects of _wording_ in the letter contents. They use as baseline the tax authority's standard letter. They **extended** the letter along three dimensions: a threat (of legal and financial consequences); a moral appealing (behavioral motives); and social information (stressing the high level of compliance). Their main parameter of interest are fee payments within 50 days of the experiment.
+
+### Briefly describe the design of the experiment.
+
+The authors experimentally manipulated mailings sent by Austrian tax authority to more than fifty thousands potential evaders. It is important to notice this list is not randomly sampled from the whole Austrian population, but instead is a selected sample of potential evaders. Therefore, the experiment is randomized only within the listed tax payers. A cover letter, an information sheet and a response and registration form with prepaid envelope were the contents of the mailing.
+
+In the standard letter, it is explained that the recipient is not registered as a fee payer, which is required by law by anyone who has a TV or radio and is asked to clarify the facts to the tax authority within 14 days. Legal notice is given, like the size of the fee and the fine that can be imposed in case of detection.
+
+The treatments, which are the extensions made to the baseline letter, are randomized among the listed evaders. There are 3 extensions made, the threat contains a paragraph stressing the significant detection risk and the consequences of noncompliance. The social information treatment include a paragraph with information of the actual level of compliance, 94\%. Finally the moral appeal treatment extended the baseline letter pointing out that "who do not conscientiously register [...] harm all honest households. Hence, registering is also a matter of fairness".
+
+The listed potential evaders amounted to more than fifty thousand and comprise only those who had not received any prior mailing. A 5\% random subsample was set aside to be the no-mailing group (T0). The remaining recipients were randomized into 6 treatment buckets (T1-T6). 
+
+### What is the minimum detectable effect for the main parameter of interest? Did the study have adequate power? (you can use the authors' data to answer this question)
+
+### Explain how the authors conducted inference.
+
+### Use the assessment proposed by @Ferman2019 to check whether inference based on the asymptotic distribution of the estimator is reliable.
+
+### Calculate the p-values using randomization inference. How does that differ from the p-value based on the asymptotic distribution?
+
+### Discuss potential problems in the experiment. Discuss how you would be able to check whether these problems are relevant (for example, by looking at the available data or by collecting more data), or how the experiment could have been done differently to avoid such problems. Be clear about whether the potential problems you raised were discussed in the paper.
+
+## References
