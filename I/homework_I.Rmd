@@ -67,7 +67,7 @@ where $P$ is the proportion of treated individuals, $c_t$ is the cost of treatme
 
 ### What is the minimum detectable effect for the main parameter of interest? Did the study have adequate power? (you can use the authors' data to answer this question)
 
-Let's first calculate MDE for the effect of any treatment (T1-T6) comparing to the control group (T0). The proportion of treated individuals in the study is 0.949 for a total number of 50498. Ideally one should NOT first collect the data, then run regressions to estimate the error's variance, but we are not in a perfect world.
+Let's first calculate MDE for the effect of any treatment (T1-T6) comparing to the control group (T0). The proportion of treated individuals in the study is 0.949 for a total number of individuals of 50,498. Ideally one should NOT first collect the data, then run regressions to estimate the error's variance, but we are not in a perfect world.
 
 
 \begin{equation}
@@ -213,7 +213,7 @@ kbl(ppvals_df, digits = 4, booktabs = TRUE,
   kable_classic(full_width = FALSE)
 ```
 
-One can see from above table and comparing to the results obtained from full regression, the p-value for mailing is indeed very close to zero, this treatment being highly significant. Moral and Info treatments, although with different p-values, continue to be not significant. The remarkable change is the p-value for the threat. From a very low p-value, being significant at 1% when asymptotic inference is carried out, the randomization inference attributes an exact p-value of `r format(ppvals_df[2,2], digits = 2)`, and now one can only reject the null hypothesis for this treatment at 10% level of significance.
+One can see from the above table and comparing to the results obtained from full regression, the p-value for mailing is indeed very close to zero, this treatment being highly significant. Moral and Info treatments, although with different p-values, continue not being significant. The remarkable change is the p-value for the threat. From a very low p-value, being significant at 1% when asymptotic inference is carried out, the randomization inference attributes an exact p-value of `r format(ppvals_df[2,2], digits = 2)`, and now one can only reject the null hypothesis for this treatment at 10% level of significance.
 
 ### Discuss potential problems in the experiment. Discuss how you would be able to check whether these problems are relevant (for example, by looking at the available data or by collecting more data), or how the experiment could have been done differently to avoid such problems. Be clear about whether the potential problems you raised were discussed in the paper.
 
@@ -229,6 +229,16 @@ The authors comment very briefly in section 6.2 about indirect treatment effects
 ### Replication bonus
 
 In this section I will replicate the results from tables 2 and 3 from @Fellner2013. The authors conducted their regression estimations in Stata, while I coded everything in R, thus it is important to show we can arrive at the same results in both languages.
+
+```{r table1-fellner, results = 'asis', warning=FALSE}
+kbl(tab1, digits = 2, booktabs = TRUE,     
+    col.names = c("", "", "Gender", "Age",
+                  "Population", "Pop. density", "Compliance",
+                  "Observations"),
+    caption = "Replication of Table 1. Mean values of individual and municipality characteristics per treatment.") %>% 
+  kable_styling(latex_options = "HOLD_position") %>% 
+  kable_classic(full_width = FALSE)
+```
 
 ```{r table2-fellner, results = "asis", warning=FALSE}
 fixest::setFixest_dict(c(resp_A = "Registration", 
@@ -274,6 +284,7 @@ if (tex_output) {
 }
 ```
 
+\newpage
 ### Annex - R Code
 
 ```{r annex, code=readLines("replication_fellner.R"), eval = FALSE, echo=TRUE}
