@@ -8,6 +8,7 @@ library(data.table)
 library(tidyfast)
 library(sandwich)
 library(lmtest)
+library(modelsummary)
 
 #' Reading in the dataset
 data <- fread("I/input/cps_union_data.csv")
@@ -107,20 +108,13 @@ resid_union_cov <- residuals(union_cov)
 ssr_union_cov <- deviance(union_cov)
 #' Compute the weight vector
 union_vec <- data_cov[, union]
-weight <- (union_vec + resid_union_cov*(1 - 2*union_vec))/ssr_union_cov
+weight <- (resid_union_cov*(2*union_vec - 1))/ssr_union_cov
 data_cov[, weight := weight] # column bind weight to data_cov
 #' Summary statistics
-w_summary <- data_cov[, 
-                      lapply(.SD, function(x){
-                        t <- summary(x)
-                        n <- names(t)
-                        return(list(data.frame(stat = n, value = as.numeric(t), 
-                                               stringsAsFactors = FALSE)))
-                      }), 
-                      by = union, .SDcols = "weight"]
-
-w_summary <- dt_unnest(w_summary, weight) %>% 
-  dcast(stat~union, value.var = "value")
+w_summary <- datasummary(Mean+Median+SD+Min+Max+sum ~ weight*factor(union), 
+                         data = data_cov, 
+                         fmt = "%.6f", 
+                         output = 'data.frame')
 #' Do the weights sum to one in control?
 data_cov[, sum(.SD), by = union, .SDcols = "weight"]
 #' negative values?

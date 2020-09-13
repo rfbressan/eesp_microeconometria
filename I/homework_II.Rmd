@@ -26,6 +26,7 @@ library(dplyr)
 library(tidyr)
 library(ggplot2)
 library(kableExtra)
+library(modelsummary)
 library(stargazer)
 library(texreg)
 load("input/homework_II.RData")
@@ -39,12 +40,12 @@ First we notice there is an imbalance on the number of unionized and not unioniz
 
 Since `union` is a dummy variable, this difference in means can be thought as a simple regression of `earnings` on `union` and the coefficient $\beta_1$ is the difference in means.
 
-$$
+
 \begin{equation}
 \text {earnings}_{i}=\beta_{0}+\beta_{1} \text{union}_{i}+\epsilon_{i}
 (\#eq:earnings)
 \end{equation}
-$$
+
 
 This is clearly not a good estimator for the causal effect of union coverage on wages due to **selection bias**. There may be many hidden factors driving wages that are also correlated to the willingness of being part of a union, thus, the difference in average wage of unionized workers and not unionized workers is a _biased_ estimate for the causal effect under study. 
 
@@ -52,24 +53,24 @@ From now on, let's adopt the notation settled in @Imbens2015 and let the individ
 
 Thus, when we just compare the average earnings of workers, unionized and not, we are making the following estimation:
 
-$$
+
 \begin{align*}
 E[Y_i(1)|W_i=1]-E[Y_i(0)|W_i=0]&=\underbrace{E[Y_i(1)|W_i=1]-E[Y_i(0)|W_i=1]}_{ATT}\\
 &+\underbrace{E[Y_i(0)|W_i=1]-E[Y_i(0)|W_i=0]}_{\text{selection bias}}
 \end{align*}
-$$
+
 and while the ATT is a valid estimation of causal effect, we don't have a clean figure of it when taking a simple difference of means, which will be plagued by selection bias.
 
 [^1]: After removing observations where there is no earnings information available, `r ear_na` individuals.
 
 2. **In order to improve and/or assess the credibility of your previous results, you decide to run a linear regression:**
 
-$$
+
 \begin{equation}
 \text {earnings}_{i}=\beta_{0}+\beta_{1} \text {union}_{i}+\gamma^{\prime} Z_{i}+\epsilon_{i}
 (\#eq:earnings-cov)
 \end{equation}
-$$
+
 where $Z_{i}$ are a set of controls.
 
 a. Specify a linear model (\@ref(eq:earnings-cov)) by laying out a set of covariates $Z$ to be included as controls. Justify your set of controls. What is the interpretation of $\beta_{1}$ in your model?
@@ -119,36 +120,43 @@ kbl(nobs_level, booktabs = TRUE,
 With a cleaned, prepared and meaningful dataset we are now able to perform the regression in model \@ref(eq:earnings-cov). The coefficient found on variable `union` is the impact of being unionized on our _baseline_ individual, that is, the individual in the first line of table \@ref(tab:nobs-level), meaning a not unionized, male, white, married with spouse present and so on. If we are interested in the effect of joining a union for other representative individuals, we should include the interaction of union to all other covariates and analyze the result.
 
 ```{r regression1, results='asis'}
-stargazer(model0, model1, type = stg_type,
-          se = list(robust0.se, robust1.se),
-          p = list(robust0.pval, robust1.pval),
-          #column.labels = c("(1)"),
-          dep.var.labels = "earnings",
-          title = "Results from regressions.",
-          label = "tab:regression1",
-          keep = "union",
-          notes = "White corrected standard errors." 
-)
+# stargazer(model0, model1, type = stg_type,
+#           se = list(robust0.se, robust1.se),
+#           p = list(robust0.pval, robust1.pval),
+#           #column.labels = c("(1)"),
+#           dep.var.labels = "earnings",
+#           title = "Results from regressions.",
+#           label = "tab:regression1",
+#           keep = "union",
+#           notes = "White corrected standard errors." 
+# )
+msummary(list(model0, model1), output = "kableExtra",
+         title = "Results from regressions.",
+         stars = TRUE,
+         coef_omit = "[^union]",
+         gof_omit = "IC|Log|F|R2$",
+         notes = "White corrected standard errors in parentheses.") %>% 
+  kable_classic(full_width = FALSE)
 ```
 
-From the results of table \@ref(tab:regression1) we find that $\beta_1$ for the estimated model is significant and has a value of `r format(model1_coef_tbl["union", "Estimate"], digits = 2)`, which is lower than the simple difference of means found in model (\@ref(eq:earnings)). We are still reluctant to give a causal interpretation to the coefficient $\beta_1$ in model (\@ref(eq:earnings-cov)) since it is not at all clear we have controlled for every factor that affects earnings and are correlated to the choice of joining a labor union.
+From the results of table \@ref(tab:regression1) we find that $\beta_1$ for the estimated model is significant and has a value of `r format(model1_coef_tbl["union", "Estimate"], digits = 2)`, which is lower than the simple difference of means found in model \@ref(eq:earnings). We are still reluctant to give a causal interpretation to the coefficient $\beta_1$ in model \@ref(eq:earnings-cov) since it is not at all clear we have controlled for every factor that affects earnings and are correlated to the choice of joining a labor union.
 
 Using the Frisch-Waugh-Lovell theorem, we can show that the OLS estimator for $\beta_{1}$ has the representation:
 
-$$
+
 \begin{equation}
 \hat{\beta}_{1}=\sum_{i=1}^{N} \text {union}_{i} \cdot \omega_{i} \cdot \text{earnings}_{i}-\sum_{i=1}^{N}\left(1-\text{union}_{i}\right) \cdot \omega_{i} \cdot \text{earnings}_{i}
 (\#eq:beta1hat)
 \end{equation}
-$$
+
 where weights $\omega_{i}$ are:
 
-$$
+
 \begin{equation}
 \omega_{i}=\frac{\text{union}_{i}+\hat{\xi}_{i}\left(1-2 \text {union}_{i}\right)}{\text{SSR}_{\text{union}, Z}}
 (\#eq:weights)
 \end{equation}
-$$
+
 
 with $\hat{\xi}_{i}$ being the residual of observation $i$ from a linear regression of union $_{i}$ on $Z,$ including an intercept; and SSR union, $Z$ is the sum of squared residuals of this auxiliary regression.
 
@@ -157,13 +165,14 @@ c. compute the weights for your specification using the formula above. Report su
 Table \@ref(tab:w-summary) presents summary statistics for weights by control and treatment groups, not in union and unionized respectively.
 
 ```{r w-summary, results='asis'}
-kbl(w_summary, booktabs = TRUE, digits = 6,
-    caption = "Summary statistics for weights.",
-    col.names = c("Statistic", "Not Union", "Union")) %>% 
+w_summary %>% 
+  kbl(booktabs = TRUE, 
+      caption = "Summary statistics for weights.",
+      col.names = c("Statistic", "Not Union", "Union")) %>% 
   kable_classic(full_width = FALSE)
 ```
 
-The sum of weights for the control group is -1, while that for treatment group is approximately 0.277. There are negative values for the weights in both groups, but the values are very small in magnitude. As for outliers, we better make a boxplot, shown in figure \@ref(fig:weights-box).
+The sum of weights are 1 for both control and treatment groups. There are negative values for the weights in control group, but the values are very small in magnitude. This is expected according to @Imbens2015b . As for outliers, we better make a boxplot, shown in figure \@ref(fig:weights-box).
 
 ```{r weights-box, fig.cap="Box-plot of weights.", fig.align='center'}
 ggplot(data_cov, aes(factor(union), weight)) +
@@ -172,9 +181,65 @@ ggplot(data_cov, aes(factor(union), weight)) +
   theme_classic()
 ```
 
+**COMPARE THIS WEIGHT WITH HORVITZ-THOMPSON AND OTHERS**
+The Horvitz-Thompson -- HT -- estimator can be written as:
+
+
+\begin{equation}
+\hat{\beta}_1^{\mathrm{ht}}=\frac{1}{N} \sum_{i=1}^{N} \frac{\text{union}_{i} \cdot\text{earnings}_{i}}{e\left(Z_{i}\right)}-\frac{1}{N} \sum_{i=1}^{N} \frac{\left(1-\text{union}_{i}\right) \cdot \text{earnings}_{i}}{1-e\left(Z_{i}\right)}
+(\#eq:ht)
+\end{equation}
+
+where $e(Z_i)$ is the propensity score given the set of covariates $Z_i$. Thus, the HT estimator is weighting the regression by a measure that is the inverse of the probability of being assigned to the observed treatment (i.e. active treatment or control treatment). If the population propensity score is known, then the weights for treatment and control are:
+
+$$
+\omega_i^{\mathrm{ht}} = \left\{\begin{array}{ll}
+1 /N\cdot\left(1-e\left(Z_{i}\right)\right) & \text { if } \text{union}_{i}=0 \\
+1 / N\cdot e\left(Z_{i}\right) & \text { if } \text{union}_{i}=1
+\end{array}\right.
+$$
+
+This contrasts to the weights assigned by the FWL method, which are related to the inverse of the treatment's variance that is _not_ explained by the covariates, that is, the treatment's residual variance in the auxiliary regression. 
+
+$$
+\omega_i= \left\{\begin{array}{ll}
+  -\hat\xi_i / \text{SSR}_{union,Z}& \text { if } \text{union}_{i}=0 \\
+  \hat\xi_i / \text{SSR}_{union,Z}& \text { if } \text{union}_{i}=1
+   \end{array}\right.
+$$
+
 3. **State a causal estimand of interest (ATT or ATE) and the assumptions required for the identification of this effect on a selection-on-observables framework. Explain why you require these assumptions.**
 
-4. **Report balance checks (t-stats and normalized differences) for a priori relevant (for identification) covariates in the treatment and control group. Are these covariates balanced between groups?**
+We can state the average treatment effect -- ATE -- and the average treatment effect on the treated -- ATT -- on the population as: 
+
+
+\begin{align}
+\tau_{ate}&=E[Y_i(1)-Y_i(0)] (\#eq:ate)\\
+\tau_{att}&=E[Y_i(1)-Y_i(0)|W_i=1] (\#eq:att)
+\end{align}
+
+
+The main assumption for this simple characterization is the validity of the so called SUTVA -- stable unit treatment value -- that incorporates both the idea that units do not interfere with one another and that for each unit there is only a single version of the active treatment.
+
+**Assumption (SUTVA)**
+_The potential outcomes for any unit do not vary with the treatments assigned to other units, and, for each unit, there are no different forms or versions of each treatment level, which lead to different potential outcomes._
+
+First, SUTVA assumes no-interference of one unit's treatment on other unit's outcome, that is, no spillovers are assumed. Second, the individual receiving a treatment (control or active) cannot receive treatments of different efficacy that affects the outcome.
+
+Given SUTVA, there are basically three main assumptions made on the assignment mechanism for identification of causal effects, [@Imbens2015].
+
+1. Individualistic assignment: This limits the dependence of a particular unit's assignment probability on the values of covariates and potential outcomes for other
+units.
+
+2. Probabilistic assignment: This requires the assignment mechanism to imply a nonzero probability for each treatment value, for every unit.
+
+3. Unconfounded assignment: This disallows dependence of the assignment mechanism on the potential outcomes.
+
+The unconfounded assumption is also known as the conditional independence assumption -- CIA, [@Angrist2008] .
+
+4. **Report balance checks (t-stats and normalized differences) for _a priori_ relevant (for identification) covariates in the treatment and control group. Are these covariates balanced between groups?**
+
+
 
 5. **Estimate a propensity score model for union using logistic regression. State the variable selection method you will use (e.g. "I'll use Imbens and Rubin's stepwise selection algorithm, taking ... as base variables, and letting their method select $\ldots$ "). Comment on your results. What is the normalized difference of the latent indices of the logistic model, $X_{i}^{\prime} \hat{\kappa},$ in the treatment vs control group?**
 
