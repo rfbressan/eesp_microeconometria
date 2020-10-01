@@ -22,13 +22,14 @@ knitr::opts_chunk$set(echo = FALSE)
 tex_output <- knitr::is_latex_output()
 stg_type <- ifelse(tex_output, 'latex', 'html')
 
+library(data.table)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
 library(kableExtra)
 library(modelsummary)
-library(stargazer)
-library(texreg)
+# library(stargazer)
+# library(texreg)
 load("input/homework_II.RData")
 ```
 
@@ -73,7 +74,7 @@ and while the ATT is a valid estimation of causal effect, we don't have a clean 
 
 where $Z_{i}$ are a set of controls.
 
-a. Specify a linear model (\@ref(eq:earnings-cov)) by laying out a set of covariates $Z$ to be included as controls. Justify your set of controls. What is the interpretation of $\beta_{1}$ in your model?
+a. Specify a linear model \@ref(eq:earnings-cov) by laying out a set of covariates $Z$ to be included as controls. Justify your set of controls. What is the interpretation of $\beta_{1}$ in your model?
 
 In case one wants to include covariates to the model, it's appropriate to make sure these variables help to explain variations in earnings, be that by theoretical modeling or empirical findings on earnings. With that qualification in mind, I have chosen the following variables to be in the covariates' set. Notice that nothing is being said about the covariates having a _causal effect_ on earnings, but merely these variables help to explain variations in earnings, that is, they are correlated. Table \@ref(tab:covariates) bellow presents the variables chosen and a brief description based on the dictionary provided.
 
@@ -88,10 +89,11 @@ Those variables were chosen based on previous literature relating earnings to so
 
 I have chosen not to include variables like `worked_last_year` and `class_of_worker_last_year` because, while they may be related to current earnings, these are essentially variables that capture model dynamics. Since I am more interested in cross-sectional results, lagged variables would have a different interpretation and would capture dynamic factors, like persistence in earnings, but not economic or social traits. 
 
-Adding covariates to our model helps in making the case for a causal interpretation of $\beta_1$, but it is debatable whether we are including all relevant variables or not. A causal interpretation is due **only** if we control for all factors that affect earnings and are correlated to the worker's choice of entering the union. This is _unlikely_ to be true in the current setup with a limited number of variables, thus, it is still uncertain one can make causal inference with model \@ref(eq:earnings-cov).
+Adding covariates to our model helps making the case for a causal interpretation of $\beta_1$, but it is debatable whether we are including all relevant variables or not. A causal interpretation is due **only** if we control for all factors that affect earnings and are correlated to the worker's choice of entering the union. This is _unlikely_ to be true in the current setup with a limited number of variables, thus, it is still uncertain one can make causal inference with model \@ref(eq:earnings-cov).
 
-THEORY OF SELECTION ON OBSERVABLES HERE
-HOW CONTROLING FOR ALL COVARIATES MAKE CAUSAL INTERPRETATION
+**THEORY OF SELECTION ON OBSERVABLES HERE**
+
+**HOW CONTROLING FOR ALL COVARIATES MAKE CAUSAL INTERPRETATION**
 
 b. Estimate the specified model. What is your estimate of $\beta_{1}$? Is it significant? Briefly comment on your results.
 
@@ -99,7 +101,7 @@ Once chosen the covariates, we have a dataset of one dependent variable, `earnin
 
 ```{r missings, resutls='asis'}
 kbl(data.frame(missings), col.names = "Missings", booktabs = TRUE,
-    caption = "Missing data for model (2).") %>% 
+    caption = "Missing data.") %>% 
   kable_classic(full_width = FALSE)
 ```
 
@@ -107,7 +109,7 @@ There are 83 missing values for veteran status. Since it is much more likely not
 
 [^2]: The ratio of veterans to non-veterans in this dataset is `r format(vet_ratio[2]/vet_ratio[1], digits = 2)`. Also, we will not elaborate on a method to impute missing values, like the probability of being a veteran given a set explanatory variables so, we set every missing to zero.
 
-Now that we have imputed values for missing veteran status, we shall notice that most of our included variables are categorical. Except for `age`, which is an integer number, all other regressors are categorized according to numerical codes, but should not be interpreted as ordered data. For example, code 20 versus code 28 in `class_of_worker` should not be taken as 20 is lower than 28 as they are just codes for classification of different types of employment. Hence, our approach is to set dummy variables for each level such a categorical variable may take. When doing this categorization, one must be careful to have enough observations in any such level. Table \@ref(tab:nobs-level) shows the results of this categorization.
+Now that we have imputed values for missing veteran status, we shall notice that some of our included variables are categorical in nature. Except for `age`, which is an integer number, all other regressors are categorized according to numerical codes. Even though being categorical variables, `female` and `veteran` can be interpreted as numerical since they present only two possible values. The case for `education` is a bit more complex. The way this variable is included in our dataset, it is a categorical one but, the codes associated with it may have an ordinal interpretation, since a code of, say 70 represents a higher level of education than code 60, and so on. Hence, `education` is kept as a numerical variable in our regressions. Truly categorical, not having an ordinal interpretation are `class_of_worker`, `marital_status`, and `race`. For example, code 20 versus code 28 in `class_of_worker` should not be taken as 20 is lower than 28 as they are just codes for classification of different types of employment. Hence, our approach is to set dummy variables for each level such a categorical variable may take. When doing this categorization, one must be careful to have enough observations in any such level. Table \@ref(tab:nobs-level) shows the results of this categorization.
 
 ```{r nobs-level, resutls='asis'}
 kbl(nobs_level, booktabs = TRUE, 
@@ -120,16 +122,6 @@ kbl(nobs_level, booktabs = TRUE,
 With a cleaned, prepared and meaningful dataset we are now able to perform the regression in model \@ref(eq:earnings-cov). The coefficient found on variable `union` is the impact of being unionized on our _baseline_ individual, that is, the individual in the first line of table \@ref(tab:nobs-level), meaning a not unionized, male, white, married with spouse present and so on. If we are interested in the effect of joining a union for other representative individuals, we should include the interaction of union to all other covariates and analyze the result.
 
 ```{r regression1, results='asis'}
-# stargazer(model0, model1, type = stg_type,
-#           se = list(robust0.se, robust1.se),
-#           p = list(robust0.pval, robust1.pval),
-#           #column.labels = c("(1)"),
-#           dep.var.labels = "earnings",
-#           title = "Results from regressions.",
-#           label = "tab:regression1",
-#           keep = "union",
-#           notes = "White corrected standard errors." 
-# )
 msummary(list(model0, model1), output = "kableExtra",
          title = "Results from regressions.",
          stars = TRUE,
@@ -153,7 +145,7 @@ where weights $\omega_{i}$ are:
 
 
 \begin{equation}
-\omega_{i}=\frac{\text{union}_{i}+\hat{\xi}_{i}\left(1-2 \text {union}_{i}\right)}{\text{SSR}_{\text{union}, Z}}
+\omega_{i}=\frac{\hat{\xi}_{i}\left(2 \text {union}_{i}-1\right)}{\text{SSR}_{\text{union}, Z}}
 (\#eq:weights)
 \end{equation}
 
@@ -172,7 +164,7 @@ w_summary %>%
   kable_classic(full_width = FALSE)
 ```
 
-The sum of weights are 1 for both control and treatment groups. There are negative values for the weights in control group, but the values are very small in magnitude. This is expected according to @Imbens2015b . As for outliers, we better make a boxplot, shown in figure \@ref(fig:weights-box).
+The sum of weights are 1 for both control and treatment groups. There were no negative values for the weights in control group, although negative values should not come as a surprise according to @Imbens2015b . As for outliers, we better make a boxplot, shown in figure \@ref(fig:weights-box).
 
 ```{r weights-box, fig.cap="Box-plot of weights.", fig.align='center'}
 ggplot(data_cov, aes(factor(union), weight)) +
@@ -181,9 +173,7 @@ ggplot(data_cov, aes(factor(union), weight)) +
   theme_classic()
 ```
 
-**COMPARE THIS WEIGHT WITH HORVITZ-THOMPSON AND OTHERS**
 The Horvitz-Thompson -- HT -- estimator can be written as:
-
 
 \begin{equation}
 \hat{\beta}_1^{\mathrm{ht}}=\frac{1}{N} \sum_{i=1}^{N} \frac{\text{union}_{i} \cdot\text{earnings}_{i}}{e\left(Z_{i}\right)}-\frac{1}{N} \sum_{i=1}^{N} \frac{\left(1-\text{union}_{i}\right) \cdot \text{earnings}_{i}}{1-e\left(Z_{i}\right)}
@@ -218,6 +208,13 @@ We can state the average treatment effect -- ATE -- and the average treatment ef
 \tau_{att}&=E[Y_i(1)-Y_i(0)|W_i=1] (\#eq:att)
 \end{align}
 
+In the case where the assumptions we'll depict next, hold only after conditioning on a set of covariates, $Z_i$, the conditional average treatment effects take the form:
+
+\begin{align}
+\tau_{cate}(z)&=E[Y_i(1)-Y_i(0)|Z_i=z] (\#eq:cate)\\
+\tau_{catt}(z)&=E[Y_i(1)-Y_i(0)|Z_i=z, W_i=1] (\#eq:catt)
+\end{align}
+and the estimands from equations \@ref(eq:ate) and \@ref(eq:att) are computed from taking the expected values of the conditional couterparts over the distribution of $Z$.
 
 The main assumption for this simple characterization is the validity of the so called SUTVA -- stable unit treatment value -- that incorporates both the idea that units do not interfere with one another and that for each unit there is only a single version of the active treatment.
 
@@ -239,22 +236,221 @@ The unconfounded assumption is also known as the conditional independence assump
 
 4. **Report balance checks (t-stats and normalized differences) for _a priori_ relevant (for identification) covariates in the treatment and control group. Are these covariates balanced between groups?**
 
+```{r cat-balance, results='asis'}
+kbl(cat_balance, booktabs = TRUE,
+    col.names = c("Level", "N", "Percent", "N", "Percent"),
+    caption = "Balance of categorical variable 'class of worker'.") %>% 
+  kable_classic(full_width = FALSE) %>% 
+  add_header_above(c(" " = 1, "Not Union" = 2, "Union" = 2))
+```
 
+
+```{r num-balance, results='asis'}
+kbl(num_balance, booktabs = TRUE,
+    col.names = c("Variable", "Mean", "Std. Dev.", "Mean", "Std. Dev", "Diff. in Means", "Std.Dev.", "Norm. Diff."),
+    caption = "Balance of numerical variables.") %>% 
+  kable_classic(full_width = FALSE) %>% 
+  add_header_above(c(" " = 1, "Not Union" = 2, "Union" = 2, "Statistic" = 3))
+```
+
+From tables \@ref(tab:cat-balance) and \@ref(tab:num-balance) one can see that numerical variables are well balanced between control and treatment groups, but categorical variables have significant proportion differences.
 
 5. **Estimate a propensity score model for union using logistic regression. State the variable selection method you will use (e.g. "I'll use Imbens and Rubin's stepwise selection algorithm, taking ... as base variables, and letting their method select $\ldots$ "). Comment on your results. What is the normalized difference of the latent indices of the logistic model, $X_{i}^{\prime} \hat{\kappa},$ in the treatment vs control group?**
 
+We will use three methods for variable selection and compare the results. The first method is the one proposed by @Imbens2015b. We have selected the same variables as in model \@ref(eq:earnings-cov), and presented in table \@ref(tab:covariates), to be the basic covariates $X_B$, while all other meaningful variables were left to be chosen by the algorithm[^3]. Second order terms were left to be chosen
+
+[^3]: Variables "V1", "CPSID", "CPSIDP", "public_housing", "employed" were deemed not meaningful for the regression modeling. Besides, "own_farm_income_last_year" had outlier problems and also, was not included in the algorithms.
+
+The second algorithm of choice was the logit lasso based on @Belloni2014 and implemented in the R package `hdm`. We left the algorithm choose any variable deemed meaningful and their interactions up to the second order without imposing any "must have" variable. 
+
+Finally, the third model for estimating the propensity score was a _full_ logit model with all meaningful variables and their interactions up to second order. The basic logit model for `union` can be written as:
+
+
+\begin{align}
+\text{union}_i&=\ell(\mathbf{Z}_i^\prime \boldsymbol\beta)+\varepsilon_i
+(\#eq:ps-union)\\
+\ell(x) &= \frac{e^x}{1+e^x}
+(\#eq:logit)
+\end{align}
+
+where $\mathbf{Z}$ is the transformed dataset, possibly including all covariates and their second order terms and interactions. The variables in $\mathbf{Z}$ are selected by the above algorithms.
+
+```{r ps-bal, resutls='asis'}
+kbl(li_bal, digits = 4, booktabs = TRUE,
+    caption = "Normalized difference among latent indices for different logistic models specification.",
+    col.names = c("Logistic Model", "Mean", "Var", "Mean", "Var", "Norm. Diff.")) %>% 
+  kable_classic(full_width = FALSE) %>% 
+  add_header_above(c(" " = 1, "Not Union" = 2, "Union" = 2, "Statistic" = 1))
+```
+
+Table \@ref(tab:ps-bal) shows the latent indices mean values, variances and the normalized difference for each selection model by treatment. In Annex A we present the list of selected variables and their interactions by selection model. We can see by the normalized difference that Lasso did a good job at making apart the control and treatment units. While the indices' average value are quite different between groups, their standard deviation is very low compared to other algorithms, thus yielding a good model for predicting the union status. 
+
+Although this result is desirable from a prediction point of view, the Lasso algorithm may have little overlap of propensity scores between control and treatment groups. This is specially troublesome if we end up with many treatment units without a control pair in terms of propensity score. If that is the case, our next step would be trim those treatment units from our sample and, depending on the number of treated individuals in the sample, this may be undesirable. Figure \@ref(fig:ps-hist) shows histograms for propensity scores from which we can visually analyze the common support depending on the algorithm chosen.
+
+```{r ps-hist, fig.cap="Distribution of propensity score by treatment and logit model", fig.align='center'}
+dt_ps[, .(union = unlist(union), ps = unlist(ps)), by = model] %>% 
+  ggplot(aes(ps)) +
+  geom_histogram(aes(y = stat(density)), color = "White", bins = 50) +
+  facet_grid(model~union, 
+             labeller = labeller(union = c(`0` = "Not Union", `1` = "Union"))) +
+  labs(x = "Propensity score") +
+  theme_light()
+```
+
+As expected, the Lasso's control group has very narrow range, leaving a great number of treatment units without any control pair. The full model and Imbens-Rubin have similar profiles, thus similar trimming points are expected. Although, as a side note on performance to fit those models, the algorithm IR is much **slower** than fitting a fully specified model.
+
 6. **Assess the quality of your estimated propensity score by verifying its balancing properties (e.g. dividing dataset in blocks using Imbens and Rubin's approach and verifying covariate balance within each block).**
+
+```{r summary-block-ir, resutls='asis'}
+kbl(summary_block_ir, digits = 2, booktabs = TRUE,
+    caption = "Balance assessment by blocks for IR model.") %>% 
+  kable_classic(full_width = FALSE) %>% 
+  add_header_above(c(" " = 1, "Blocks" = 11)) %>% 
+  add_footnote("Note: Values presented are the t-statistic from the difference of means between treatment and control units.", "none")
+```
+
+```{r summary-block-lasso, resutls='asis'}
+kbl(summary_block_lasso, digits = 2, booktabs = TRUE,
+    caption = "Balance assessment by blocks for Lasso model.") %>% 
+  kable_classic(full_width = FALSE) %>% 
+  add_header_above(c(" " = 1, "Blocks" = 11)) %>% 
+  add_footnote("Note: Values presented are the t-statistic from the difference of means between treatment and control units.", "none")
+```
+
+```{r summary-block-all, resutls='asis'}
+kbl(summary_block_all, digits = 2, booktabs = TRUE,
+    caption = "Balance assessment by blocks for Full model.") %>% 
+  kable_classic(full_width = FALSE) %>% 
+  add_header_above(c(" " = 1, "Blocks" = 8)) %>% 
+  add_footnote("Note: Values presented are the t-statistic from the difference of means between treatment and control units.", "none")
+```
+
+There are many NaN values for covariates that are categorical in nature (and were transformed to numeric format by one-hot encoding of dummies), this is probably due to a lack of observations of that specific level in the block. This should not be taken as lack of balanace for the covariate itself.
+
+Indeed many strata of `class_of_worker` type of covariate do not have any observation for a given block, thus the statistics can't be computed, as presented in table \@ref(obs-block-ir) for the IR model only. But this is mainly due to the attribution for the NA block, which we are removing from balance assessment. 
+
+```{r obs-block-ir, results='asis'}
+kbl(obs_block_ir, digits = 2, booktabs = TRUE,
+    caption = "Observations for selected levels from categorical covariates.") %>% 
+  kable_classic(full_width = FALSE) %>% 
+  kable_styling(font_size = 8) %>% 
+  landscape()
+```
 
 7. **Use Imbens and Rubin's approach (Chapter 16) to trim your dataset in order to improve overlap. Rereport the results in (4). What happened to them? What about the normalized difference of the latent indices of the logistic model?**
 
+The trimming method supressed `r paste(c(sum(!trim_idx_ir), sum(!trim_idx_lasso), sum(!trim_idx_all)), collapse = ", ")` observations from our sample for models IR, Lasso and Full, respectively.
+
+```{r trim-bal-ir, results='asis'}
+kbl(trim_bal_ir, digits = 2, booktabs = TRUE,
+    caption = "Balance after trimming. Model IR.",
+    col.names = c("Covariate", "Mean Control", "Mean Treatment", "t-stat", "Norm.Diff.")) %>% 
+  kable_classic(full_width = FALSE)
+```
+
+
+```{r trim-bal-lasso, results='asis'}
+kbl(trim_bal_lasso, digits = 2, booktabs = TRUE,
+    caption = "Balance after trimming. Model Lasso.",
+    col.names = c("Covariate", "Mean Control", "Mean Treatment", "t-stat", "Norm.Diff.")) %>% 
+  kable_classic(full_width = FALSE)
+```
+
+```{r trim-bal-all, results='asis'}
+kbl(trim_bal_all, digits = 2, booktabs = TRUE,
+    caption = "Balance after trimming. Full model.",
+    col.names = c("Covariate", "Mean Control", "Mean Treatment", "t-stat", "Norm.Diff.")) %>% 
+  kable_classic(full_width = FALSE)
+```
+
+```{r trim-bal-li, resutls='asis'}
+kbl(trim_bal_li, digits = 2, booktabs = TRUE,
+    caption = "Balance for logit's latent indices.",
+    col.names = c("Model", "Before trimming", "After trimming")) %>% 
+  kable_classic(full_width = FALSE) %>% 
+  add_header_above(c(" " = 1, "Normalized difference" = 2))
+```
+
+
 8. **Estimate your causal estimand of interest using subclassification on the estimated propensity score.**
+
+Before we check the overall ATE or ATT, let's check the number of treated and control units left in each block after trimming. If by any chance, a block is left with either only one control or treated unit, standard error for the causal effect cannot be computed for that block, thus we must drop this block as a fine tune trimming procedure. The blocking procedure this time is targeting not the balance of covariates, but the estimation of ATE or ATT through subclassification, thus we will "re-block" the units with the `trim` option set to false in the `ps_block` function. The number of treated and control units in each block and for each of the three models we are assessing are presented in table \@ref(tab:ntc-block)
+
+```{r ntc-block, results='asis'}
+kbl(ntc_block, booktabs = TRUE,
+    caption = "Number of units in each block, by treatment and model.",
+    col.names = c("Block", rep(c("Treatment", "Control"), 3))) %>% 
+  kable_classic(full_width = FALSE) %>% 
+  add_header_above(c(" " = 1, "Imbens-Rubin" = 2, "Lasso" = 2, "Full" = 2))
+```
+
+We have no such problem in any of our models, but we have to notice the Imbens-Rubin model block #1 has only 3 treated units. This is not a major concern for subclassification without any covariates, but may pose a problem if we stratify further by including covariates in subclassification's regression. 
+
+Thus, we proceed with the computation of estimated causal effects. First, we will estimate both ATE and ATT **without** any controlling covariates. Results shown in table \@ref(tab:effect-nc) bellow.
+
+```{r effect-nc, results='asis'}
+kbl(sub_effect_nc, digits = 2, booktabs = TRUE,
+    caption = "Causal effects without contolling covariates.",
+    col.names = c("Statistic", rep(c("ATE", "ATT"), 3))) %>% 
+  kable_classic(full_width = FALSE) %>% 
+  add_header_above(c(" " = 1, "Imbens-Rubin" = 2, "Lasso" = 2, "Full" = 2))
+```
+
+Now we will add the three generally most imbalanced covariates after the trimming procedure. Those are `age`, `education` and `private_health_insurance`.
+
+```{r effect, results='asis'}
+kbl(sub_effect, digits = 2, booktabs = TRUE,
+    caption = "Causal effects contolling by imbalanced covariates.",
+    col.names = c("Statistic", rep(c("ATE", "ATT"), 3))) %>% 
+  kable_classic(full_width = FALSE) %>% 
+  add_header_above(c(" " = 1, "Imbens-Rubin" = 2, "Lasso" = 2, "Full" = 2))
+```
+
+As suspected, inclusion of covariates led Imbens-Rubin model, but also surprisingly the Lasso model, not being able to compute standard errors for the causal effects. The only model from which we are able to make inference, when controlling for some imbalanced covariates, is the Full model. Also, the Full model appears to be more robust to the inclusion of covariates, followed by IR model. The Lasso specification, besides estimating $ATE > ATT$, also had the largest variations in estimates after controlling.
 
 9. **Estimate your causal estimand of interest using matching on the estimated propensity score.**
 
+```{r match-nc-effect, results='asis'}
+kbl(match_nc, digits = 2, booktabs = TRUE,
+    caption = "Matching on propensity score. Causal effects without contolling covariates.",
+    col.names = c("Model", rep(c("Estimate", "Std.Error", "N.obs", "N.treated", "N.matched"), 2))) %>% 
+  kable_classic(full_width = FALSE) %>% 
+  add_header_above(c(" " = 1, "ATE" = 5, "ATT" = 5))
+```
+
 10. **Estimate your causal estimand of interest using inverse probability weighting (Horvitz-Thompson). Briefly compare the results from your different estimators.**
 
+```{r ipw-effect, results='asis'}
+kbl(ipw_reg, digits = 2, booktabs = TRUE,
+    caption = "Doubly-robust causal effect estimation.",
+    col.names = c("Model", rep(c("Estimate", "Std.Error"), 2))) %>% 
+  kable_classic(full_width = FALSE) %>% 
+  add_header_above(c(" " = 1, "ATE" = 2, "ATT" = 2))
+```
+
 \newpage
-### Annex - R Code
+### Annex A - Selected covariates
+
+**Imbens-Rubin**
+
+```{r covariates-ir}
+terms_ir
+```
+
+**Lasso**
+
+```{r covariates-lasso}
+terms_lasso
+```
+
+**Full**
+
+```{r covariates-full}
+terms_all
+```
+
+\newpage
+### Annex B - R Code
 
 ```{r annex, code=readLines("homework_II.R"), eval = FALSE, echo=TRUE}
 

@@ -1,0 +1,21 @@
+variable,description,type
+CPSID,Household ID,int
+CPSIDP,Respondent ID,int
+public_housing,Does respondent live in public/social housing?,categorical
+age,Responsent's age,int
+female,Is respondent a woman?,categorical
+race,Respondent's race,categorical
+marital_status,Respondent's marital status,categorical
+veteran,Is respondent a veteran of US armed forces?,categorical
+employed,Is individual employed?,categorical
+education,Respondent's maximum educational degree,categorical
+worked_last_year,Did the respondent work in the previous year?,categorical
+total_income_last_year,Rspondent's total pre-tax personal income or losses from all sources for the previous calendar year. ,numeric
+wage_income_last_year,"Respondent's total pre-tax wage and salary income--that is, money received as an employee--for the previous calendar year.",numeric
+own_farm_income_last_year,"Respondent's net pre-income-tax earnings as a tenant farmer, sharecropper, or operator of his or her own farm during the previous calendar year.",numeric
+private_health_insurance,"Did the respondent report being covered by a private (i.e., employment-based or privately-purchased, not government) insurance plan during the preceding calendar year?",categorical
+medicaid,Was respondent covered by Medicaid during the previous calendar year?,categorical
+class_of_worker,Worker's class,categorical
+class_of_worker_last_year,Worker's class last year (if employed),categorical
+union,Is respondent covered by a union in current job?,categorical
+earnings,"Reports how much the respondent usually earned per week at their current job,",int

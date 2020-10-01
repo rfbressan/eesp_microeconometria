@@ -420,3 +420,243 @@ ferman_assessment <- function(df, model, assess_on, H0 = 0.0, nsim = 1000, alpha
   # Return the mean of rejections
   return(mean(rejections))
 }
+
+
+# Propensity score blocking -----------------------------------------------
+#Function that subdivides a given propensity score vector in subblocks
+#treat = vector with treatment assignments
+#lin.psm = vector with linearized PSs
+#K = how many covariates will we want to test/use in bias correction of estimates later on? 
+#t.max = threshold for tstat in making a further subdivide 
+#trim = should we discard extreme observations so there is overlap?
+ps_blocks <- function(treat,lin.psm, K, t.max = 1.96,  trim =T)
+{
+  if(trim){
+    b0 = min(plogis(lin.psm[treat==1]))
+    b1 = max(plogis(lin.psm[treat==0]))
+  } else
+  {
+    b0 = 0
+    b1 = 1
+  }
+  b_vec =c(b0,b1)
+  while(TRUE)
+  {
+    J = length(b_vec)-1
+    b_vec_new = do.call(c,lapply(1:J, function(j){
+      sample = (b_vec[j] <= plogis(lin.psm)) & (plogis(lin.psm) < b_vec[j+1])
+      
+      ps.treat = lin.psm[sample&treat==1]
+      ps.control = lin.psm[sample&treat==0]
+      
+      #print(length(ps.control))
+      #print(length(ps.treat))
+      
+      t.test.pass = tryCatch({abs(t.test(ps.control, ps.treat)$statistic) > t.max}, 
+                             error = function(e){return(FALSE)})
+      
+      med.val = median(c(ps.treat, ps.control))
+      
+      Nt.below = sum(ps.treat < med.val)
+      Nt.above = sum(ps.treat >= med.val)
+      Nc.below = sum(ps.control < med.val)
+      Nc.above = sum(ps.control >= med.val)
+      
+      sample.crit = min(Nt.below, Nt.above, Nc.below, Nc.above) >= max(3, K+2)
+      
+      if(t.test.pass&sample.crit)
+        return(c(b_vec[j], plogis(med.val), b_vec[j+1])) else return(c(b_vec[j], b_vec[j+1]))
+      
+    }))
+    b_vec_new = unique(b_vec_new)
+    
+    #print(length(b_vec_new))
+    if(length(b_vec_new)==length(b_vec))
+      break else b_vec = b_vec_new
+  }
+  
+  #Constructing blocking variable now
+  block_var = rep(NA, length(treat))
+  
+  for(j in 1:(length(b_vec)-1))
+    block_var[(b_vec[j] <= plogis(lin.psm)) & (plogis(lin.psm) < b_vec[j+1])] = j
+
+  return(block_var)
+}
+
+# Stepwise model selection - Imbens and Rubin -----------------------------
+# Imbens and Rubin's stepwise selection algorithm
+# treatment: character variable for treatment indicator variable
+# Xb: character vector with names of basic covariates: you may pass it as  c() if you do not want any basic covariate
+# Xt: character vector with names for covariates to be tested for inclusion
+# data: dataframe with variables
+# Clinear: threshold, in terms of likelihood ratio statistics, for inclusion of linear terms
+# Cquadratic: threshold, in terms of likelihood ratio statistics, for inclusion of quadratic/interaction terms
+# Intercept: does model include intercept?
+# Author: Luis Alvarez
+# Modifications: Rafael F. Bressan
+ir_stepwise <- function(treatment, Xb, Xt, data, Clinear = 1, Cquadratic = 2.71, intercept = TRUE)
+{
+  #Add or not intercept
+  if (intercept)
+    inter.add = "1" 
+  else inter.add = "-1"
+  
+  
+  #Formula for model
+  if (length(Xb) == 0)
+    formula = paste(treatment, inter.add, sep = " ~ ") else formula = paste(treatment, paste(c(inter.add,Xb), collapse = " + "), sep = " ~ ")
+    
+    continue = TRUE
+    
+    Xt_left = Xt
+    # First order inclusion
+    while (continue) {
+      null.model = glm(as.formula(formula), data, family = "binomial")
+      
+      null.lkl = logLik(null.model)
+      
+      test.stats = c()
+      for (covariate in Xt_left)
+      {
+        formula.test = paste(formula, covariate, sep = " + ")
+        test.model = glm(as.formula(formula.test), data, family = "binomial")
+        
+        lkl.ratio = 2*(as.numeric(logLik(test.model)) - as.numeric(null.lkl))
+        test.stats = c(test.stats, lkl.ratio)
+      }
+      
+      if (max(test.stats,na.rm = TRUE) < Clinear)
+        continue = FALSE else {
+          
+          add.coef = Xt_left[which.max(test.stats)]
+          
+          formula = paste(formula, add.coef, sep = " + ")
+          
+          Xt_left = Xt_left[-which.max(test.stats)]
+        }
+      
+    }
+    
+    #Defining Xstar set. Set of first order included variables
+    Xstar = c(Xb, Xt[!(Xt %in% Xt_left)])
+    
+    #Creating all combinations of Xstar interactions
+    combinations = expand.grid(Xstar, Xstar)
+    Xcomb = paste(combinations[,1],combinations[,2],sep = ":")
+    
+    continue = TRUE
+    
+    Xcomb_left = Xcomb
+    
+    while (continue) {
+      null.model = glm(as.formula(formula), data, family = "binomial")
+      
+      null.lkl = logLik(null.model)
+      
+      test.stats = c()
+      for (covariate in Xcomb_left)
+      {
+        formula.test = paste(formula, covariate, sep = " + ")
+        test.model = glm(as.formula(formula.test), data, family = "binomial")
+        
+        lkl.ratio = 2*(as.numeric(logLik(test.model)) - as.numeric(null.lkl))
+        test.stats = c(test.stats, lkl.ratio)
+      }
+      
+      if (max(test.stats,na.rm = TRUE) < Cquadratic)
+        continue = FALSE else {
+          
+          add.coef = Xcomb_left[which.max(test.stats)]
+          
+          formula = paste(formula, add.coef, sep = " + ")
+          
+          Xcomb_left = Xcomb_left[-which.max(test.stats)]
+        }
+      
+    }
+    
+    return(list(formula = formula,
+                inc_x = Xstar))
+}
+
+# balance table: t-test and normalized difference -------------------------
+table.test <- function(data, covariates, treat_var, col_ret = "all")
+{
+  treat_vec = data[, treat_var]
+  table = c()
+  
+  for (lab in covariates)
+  {
+    cov_vec = data[,lab]
+    control = cov_vec[treat_vec == 0 & !is.na(treat_vec)]
+    treatment = cov_vec[treat_vec == 1 & !is.na(treat_vec)]
+    
+    normalized_diff = (mean(treatment) - mean(control))/sqrt((var(treatment) + var(control))/2)
+    
+    table.line = cbind( "meanc" = mean(control), 
+                        "meant" = mean(treatment), 
+                        "tstat" = tryCatch({t.test(control, x = treatment)$statistic}, 
+                                            error = function(e){NaN}), 
+                        "norm.diff" = normalized_diff)
+    
+    table = rbind(table, table.line)
+  }
+  
+  table <- as.data.frame(table)
+  rownames(table) <- NULL
+  
+  if (col_ret[1] == "all") 
+    return(cbind(covar = covariates, table))
+  else  
+    return(cbind(covar = covariates, table[, col_ret, drop = FALSE]))
+}
+
+# 7 Trim the sample -------------------------------------------------------
+#' Author: Luis Alvarez
+trimming.imbens <- function(lin.ps, step.gamma.grid = 1e-3)
+{
+  inv.vec = 1/(plogis(lin.ps)*(1 - plogis(lin.ps)))
+  
+  if (max(inv.vec) <= 2*mean(inv.vec))
+  {
+    print("No trimming")
+    return(rep(TRUE, length(lin.ps))) 
+  }else {
+    gamma.grid <- seq(min(inv.vec), max(inv.vec), by = step.gamma.grid)
+    
+    values = sapply(gamma.grid, function(gamma){
+      (2*sum(inv.vec[inv.vec <= gamma])  - gamma*sum(inv.vec <= gamma))
+    })
+    
+    values[values < 0] = Inf
+    
+    gamma = gamma.grid[which.min(values)]
+    
+    alpha.trim = 1/2 - sqrt(1/4 - 1/gamma)
+    print(paste("Trimming threshold alpha is ",alpha.trim))
+    return(plogis(lin.ps) <= 1 - alpha.trim &  plogis(lin.ps) >= alpha.trim)
+  }
+}
+
+trimming.imbens2 <- function(lin.ps)
+{
+  inv.vec = 1/(plogis(lin.ps)*(1 - plogis(lin.ps)))
+  
+  if (max(inv.vec) <= 2*mean(inv.vec))
+  {
+    print("No trimming")
+    return(rep(TRUE, length(lin.ps))) 
+  }else {
+    # value function
+    value_fun <- function(gamma) {
+      2*sum(inv.vec[inv.vec <= gamma])  - gamma*sum(inv.vec <= gamma)
+    }
+    # root finding. g is a list with root
+    g <- uniroot(value_fun, c(min(inv.vec), max(inv.vec)))
+    
+    alpha.trim <- 1/2 - sqrt(1/4 - 1/g$root)
+    print(paste("Trimming threshold alpha is ",alpha.trim))
+    return(plogis(lin.ps) <= 1 - alpha.trim &  plogis(lin.ps) >= alpha.trim)
+  }
+}
