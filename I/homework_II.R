@@ -155,6 +155,43 @@ data_cov[, sum(.SD), by = union, .SDcols = "weight"]
 data_cov[, min(.SD), by = union, .SDcols = "weight"]
 
 # 4 Balance checks --------------------------------------------------------
+#' Assessing balance of covariates using the three methods by Imbens-Rubin
+#' balance table: t-test and normalized difference -------------------------
+table.test <- function(data, covariates, treat_var, col_ret = "all")
+{
+  #' data.table is allowed in data, but has different syntax
+  if (is.data.table(data))  treat_vec = data[, get(treat_var)]
+  else treat_vec = data[, treat_var]
+  
+  table = c()
+  
+  for (lab in covariates)
+  {
+    if (is.data.table(data))  cov_vec = data[, get(lab)]
+    else cov_vec = data[, lab]
+    
+    control = cov_vec[treat_vec == 0 & !is.na(treat_vec)]
+    treatment = cov_vec[treat_vec == 1 & !is.na(treat_vec)]
+    
+    normalized_diff = (mean(treatment) - mean(control))/sqrt((var(treatment) + var(control))/2)
+    
+    table.line = cbind( "meanc" = mean(control), 
+                        "meant" = mean(treatment), 
+                        "tstat" = tryCatch({t.test(control, x = treatment)$statistic}, 
+                                           error = function(e){NaN}), 
+                        "norm.diff" = normalized_diff)
+    
+    table = rbind(table, table.line)
+  }
+  
+  table <- as.data.frame(table)
+  rownames(table) <- NULL
+  
+  if (col_ret[1] == "all") 
+    return(cbind(covar = covariates, table))
+  else  
+    return(cbind(covar = covariates, table[, col_ret, drop = FALSE]))
+}
 #' First the categorical variables
 cat_form <- paste0(
   paste0(cat_cols, collapse = "+"), "~factor(union)*((N=1)+Percent('col'))"
@@ -163,16 +200,7 @@ cat_balance <- datasummary(as.formula(cat_form),
                            data = data_cov[, c("union", ..cat_cols)],
                            output = 'data.frame')
 #' Then numerical variables
-num_bal <- data_cov[, -c("earnings", "weight", ..cat_cols)][
-  , .(names = colnames(.SD), mean = colMeans(.SD), var = sapply(.SD, var)), 
-  by = "union"] %>% 
-  dcast(names~union, value.var = c("mean", "var"))
-num_bal[, norm_diff := .(abs(mean_1 - mean_0)/sqrt((var_1 + var_0)/2))]
-
-num_balance <- datasummary_balance(~union, 
-                                   data = data_cov[, -c("earnings", "weight", ..cat_cols)],
-                                   output = 'data.frame') %>% 
-  mutate(norm_diff = format(num_bal$norm_diff, digits = 2))
+num_balance <- table.test(data_cov, covar[!covar %in% "class_of_worker"], "union")
 
 # 5 Select covariates -----------------------------------------------------
 
@@ -187,7 +215,8 @@ num_balance <- datasummary_balance(~union,
 # Intercept: does model include intercept?
 # Author: Luis Alvarez
 # Modifications: Rafael F. Bressan
-ir_stepwise <- function(treatment, Xb, Xt, data, Clinear = 1, Cquadratic = 2.71, intercept = TRUE)
+ir_stepwise <- function(treatment, Xb, Xt, data, Clinear = 1, Cquadratic = 2.71, 
+                        intercept = TRUE)
 {
   #Add or not intercept
   if (intercept)
@@ -197,7 +226,9 @@ ir_stepwise <- function(treatment, Xb, Xt, data, Clinear = 1, Cquadratic = 2.71,
     
     #Formula for model
     if (length(Xb) == 0)
-      formula = paste(treatment, inter.add, sep = " ~ ") else formula = paste(treatment, paste(c(inter.add,Xb), collapse = " + "), sep = " ~ ")
+      formula = paste(treatment, inter.add, sep = " ~ ") 
+    else formula = paste(treatment, paste(c(inter.add,Xb), collapse = " + "), 
+                         sep = " ~ ")
       
       continue = TRUE
       
@@ -273,8 +304,11 @@ ir_stepwise <- function(treatment, Xb, Xt, data, Clinear = 1, Cquadratic = 2.71,
 }
 
 #' own_farm_income_last_year is mostly zero and has an outlier. Better not use it
-xt <- names(data_full)[! names(data_full) %in% 
-                         c(covar, "earnings", "union", "own_farm_income_last_year")]
+#' total_income_last_year and wage_income_last_year are bad controls! Do not 
+#' include them.
+xt <- names(data_full)[!names(data_full) %in% 
+                         c(covar, "earnings", "union", "own_farm_income_last_year",
+                           "total_income_last_year", "wage_income_last_year")]
 #' TEST ONLY: Select a random sample of full data for quick results
 #' set.seed(1234)
 #' s <- sample(nrow(data_full), 2000)
@@ -284,12 +318,12 @@ ps_ir <- glm(as.formula(ir_form$formula), family = "binomial",
 terms_ir <- attr(terms(ps_ir), "term.labels")
 
 # Model selection via Lasso 
-x_lasso <- names(data_full)[! names(data_full) %in% c("earnings", "union")]
+x_lasso <- c(covar, xt)
 #' using mlr package to create dummies for every factor variable
 # dt_lasso <- mlr::createDummyFeatures(as.data.frame(data_full[, -c("earnings")]),
                                      # method = "reference")
 ps_lasso <- rlassologit(union~(.)^2, 
-                        data = data_full[, -c("earnings", "own_farm_income_last_year")])
+                        data = data_full[, c("union", ..x_lasso)])
 summary(ps_lasso, all = FALSE)
 terms_lasso <- names(coef(ps_lasso))[ps_lasso$index]
 
@@ -303,7 +337,7 @@ terms_lasso <- names(coef(ps_lasso))[ps_lasso$index]
 
 #' Model with full set of covariates!
 ps_all <- glm(union~(.)^2, family = "binomial",
-              data = data_full[, -c("earnings", "own_farm_income_last_year")])
+              data = data_full[, c("union", ..covar, ..xt)])
 terms_all <- attr(terms(ps_all), "term.labels")
 
 #' data table with union and different latent indices based on estimation method
@@ -402,46 +436,15 @@ cols_full <- names(data_full)[
                             "li_lasso", "li_all", "block_ir", "block_lasso", 
                             "block_all")]
 num_cols_full <- cols_full[! cols_full %in% cat_cols_full]
-
+#' Minimum number of elements in a block is the number of all covariates to use
+K <- length(c(covar, xt))
 data_full[, `:=`(li_ir = predict(ps_ir, type = 'link'),
                  li_lasso = as.vector(predict(ps_lasso, type = 'link')),
                  li_all = predict(ps_all, type = 'link'))][
-                   , `:=`(block_ir = ps_blocks(union, li_ir, k_ir),
-                          block_lasso = ps_blocks(union, li_lasso, k_lasso),
-                          block_all = ps_blocks(union, li_all, k_all))]
+                   , `:=`(block_ir = ps_blocks(union, li_ir, K),
+                          block_lasso = ps_blocks(union, li_lasso, K),
+                          block_all = ps_blocks(union, li_all, K))]
 
-#' Assessing balance of covariates using the three methods by Imbens-Rubin
-#' balance table: t-test and normalized difference -------------------------
-table.test <- function(data, covariates, treat_var, col_ret = "all")
-{
-  treat_vec = data[, treat_var]
-  table = c()
-  
-  for (lab in covariates)
-  {
-    cov_vec = data[,lab]
-    control = cov_vec[treat_vec == 0 & !is.na(treat_vec)]
-    treatment = cov_vec[treat_vec == 1 & !is.na(treat_vec)]
-    
-    normalized_diff = (mean(treatment) - mean(control))/sqrt((var(treatment) + var(control))/2)
-    
-    table.line = cbind( "meanc" = mean(control), 
-                        "meant" = mean(treatment), 
-                        "tstat" = tryCatch({t.test(control, x = treatment)$statistic}, 
-                                           error = function(e){NaN}), 
-                        "norm.diff" = normalized_diff)
-    
-    table = rbind(table, table.line)
-  }
-  
-  table <- as.data.frame(table)
-  rownames(table) <- NULL
-  
-  if (col_ret[1] == "all") 
-    return(cbind(covar = covariates, table))
-  else  
-    return(cbind(covar = covariates, table[, col_ret, drop = FALSE]))
-}
 #' Third approach, single covariate, single stratum at a time
 #' First we need to expand factor variables into dummies
 tbl_covar <- num_cols_full[num_cols_full != "union"]
@@ -529,8 +532,9 @@ trim_idx_all <- trimming.imbens2(data_full$li_all)
 #' Add trimming indexes to dt_ps
 dt_ps[, trim_idx := list(trim_idx_ir, trim_idx_lasso, trim_idx_all)]
 
+#' Balance for numerical variables after trimming
 trim_bal_ir <- table.test(as.data.frame(data_full[trim_idx_ir]),
-                          c(num_cols_full, "li_ir"), "union") %>% 
+                          num_cols_full, "union") %>% 
   filter(covar != "union")
 trim_bal_lasso <- table.test(as.data.frame(data_full[trim_idx_lasso]),
                           num_cols_full, "union") %>% 
@@ -538,6 +542,16 @@ trim_bal_lasso <- table.test(as.data.frame(data_full[trim_idx_lasso]),
 trim_bal_all <- table.test(as.data.frame(data_full[trim_idx_all]),
                           num_cols_full, "union") %>% 
   filter(covar != "union")
+#' Balance for categorical variables after trimming
+cat_bal_ir <- datasummary(as.formula(cat_form),
+                           data = data_full[trim_idx_ir, c("union", ..cat_cols)],
+                           output = 'data.frame')
+cat_bal_lasso <- datasummary(as.formula(cat_form),
+                          data = data_full[trim_idx_lasso, c("union", ..cat_cols)],
+                          output = 'data.frame')
+cat_bal_all <- datasummary(as.formula(cat_form),
+                          data = data_full[trim_idx_all, c("union", ..cat_cols)],
+                          output = 'data.frame')
 
 #' Table for balance of latent indices before and after trimming
 no_trim_li <- dt_ps %>% 
@@ -623,20 +637,20 @@ sub_nc_lasso <- subclassification(data_full[trim_idx_lasso],
                                   "earnings", "union", "block_lasso")
 sub_nc_all <- subclassification(data_full[trim_idx_all],
                                 "earnings", "union", "block_all")
-#' Subclassification with imbalanced controls: age, education and 
+#' Subclassification with unbalanced controls: age, education and 
 #' private_health_insurance
 sub_ir <- subclassification(
   data_full[trim_idx_ir],
   "earnings", "union", "block_ir",
-  controls = c("age", "education", "private_health_insurance"))
+  controls = c("age", "education", "age_2"))
 sub_lasso <- subclassification(
   data_full[trim_idx_lasso],
   "earnings", "union", "block_lasso",
-  controls = c("age", "education", "private_health_insurance"))
+  controls = c("age", "education", "age_2"))
 sub_all <- subclassification(
   data_full[trim_idx_all],
   "earnings", "union", "block_all",
-  controls = c("age", "education", "private_health_insurance"))
+  controls = c("age", "education", "age_2"))
 #' Table with number of treated and control by block and model
 ntc_ir <- sub_nc_ir$blocks[, c("block", "nt", "nc")]
 ntc_lasso <- sub_nc_lasso$blocks[, c("block", "nt", "nc")]
@@ -646,16 +660,23 @@ ntc_block <-
   merge(ntc_ir, ntc_lasso, by = "block", all = TRUE) %>% 
   merge(ntc_all, by = "block", all = TRUE)
 #' ATT and ATE for three models without controlling covariates
-sub_effect_nc <- 
-  merge(sub_nc_ir$effects, sub_nc_lasso$effects, by = "stat") %>% 
-  merge(sub_nc_all$effects, by = "stat")
+sub_effect_nc <- rbind(sub_nc_ir$effects, 
+                       sub_nc_lasso$effects, 
+                       sub_nc_all$effects) %>% 
+  mutate(model = rep(c("Imbens-Rubin", "Lasso", "Full"), each = 2)) %>% 
+  pivot_wider(id_cols = model, names_from = stat, values_from = c(ate:att))
 #' ATT and ATE for three models with controlling covariates
-sub_effect <- 
-  merge(sub_ir$effects, sub_lasso$effects, by = "stat") %>% 
-  merge(sub_all$effects, by = "stat")
+sub_effect <- rbind(sub_ir$effects, 
+                    sub_lasso$effects, 
+                    sub_all$effects) %>% 
+  mutate(model = rep(c("Imbens-Rubin", "Lasso", "Full"), each = 2)) %>% 
+  pivot_wider(id_cols = model, names_from = stat, values_from = c(ate:att))
 
 # 9 Estimate effects with Matching ----------------------------------------
 #' Compute estimates by matching PS
+#' Add column "effect"
+dt_ps[, effect := list(c("ATE", "ATT"))]
+
 match_nc_effect <- dt_ps %>% 
   as_tibble() %>% 
   unnest(effect) %>% 
@@ -682,8 +703,6 @@ match_nc <- match_nc_effect %>%
 # 10 IPW doubly-robust estimation -----------------------------------------
 #' Overall probability of treatment. For ATT estimation
 p_treat <- mean(data_full$union)
-#' Add column "effect"
-dt_ps[, effect := list(c("ATE", "ATT"))]
 
 ipw_weights <- dt_ps %>% 
   as_tibble() %>% 
@@ -698,8 +717,10 @@ ipw_weights <- dt_ps %>%
     )))
 
 #' regressions
+#' Doubly-robust regression with the same covariates as item 2
+dbl_form <- paste("earnings~union", paste(covar, collapse = "+"), sep = "+")
 ipw_reg <- ipw_weights %>% 
-  mutate(lm_fit = list(lm(earnings~union, 
+  mutate(lm_fit = list(lm(as.formula(dbl_form), 
                           data = data_full[trim_idx], 
                           weights = weight[trim_idx])),
          coef_rob = list(coeftest(lm_fit)),
