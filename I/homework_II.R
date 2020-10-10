@@ -1,20 +1,17 @@
 #' Homework II - Microeconometrics I
 #' Author: Rafael Felipe Bressan
-#' Matching packages available and useful companions:
-#' MatchIt, Matching, twang, CBPS, ebal, designmatch, MatchThem, optmatch,
-#' WeightIt, sbw
+#' 
 #' Loading libraries
 library(dplyr)
 library(tidyr)
 library(broom)
 library(data.table)
-# library(dtplyr)
-# library(tidyfast)
 library(sandwich)
 library(lmtest)
 library(modelsummary)
 library(Matching)
 library(hdm)
+library(grf)
 
 #' Reading in the dataset
 data <- fread("I/input/cps_union_data.csv")
@@ -204,17 +201,20 @@ num_balance <- table.test(data_cov, covar[!covar %in% "class_of_worker"], "union
 
 # 5 Select covariates -----------------------------------------------------
 
-# Stepwise model selection - Imbens and Rubin -----------------------------
-# Imbens and Rubin's stepwise selection algorithm
-# treatment: character variable for treatment indicator variable
-# Xb: character vector with names of basic covariates: you may pass it as  c() if you do not want any basic covariate
-# Xt: character vector with names for covariates to be tested for inclusion
-# data: dataframe with variables
-# Clinear: threshold, in terms of likelihood ratio statistics, for inclusion of linear terms
-# Cquadratic: threshold, in terms of likelihood ratio statistics, for inclusion of quadratic/interaction terms
-# Intercept: does model include intercept?
-# Author: Luis Alvarez
-# Modifications: Rafael F. Bressan
+#' Stepwise model selection - Imbens and Rubin -----------------------------
+#' Imbens and Rubin's stepwise selection algorithm
+#' treatment: character variable for treatment indicator variable
+#' Xb: character vector with names of basic covariates: you may pass it as  c() 
+#' if you do not want any basic covariate
+#' Xt: character vector with names for covariates to be tested for inclusion
+#' data: dataframe with variables
+#' Clinear: threshold, in terms of likelihood ratio statistics, for inclusion of 
+#' linear terms
+#' Cquadratic: threshold, in terms of likelihood ratio statistics, for inclusion
+#' of quadratic/interaction terms
+#' Intercept: does model include intercept?
+#' Author: Luis Alvarez
+#' Modifications: Rafael F. Bressan
 ir_stepwise <- function(treatment, Xb, Xt, data, Clinear = 1, Cquadratic = 2.71, 
                         intercept = TRUE)
 {
@@ -317,23 +317,12 @@ ps_ir <- glm(as.formula(ir_form$formula), family = "binomial",
              data = data_full[, -c("earnings")])
 terms_ir <- attr(terms(ps_ir), "term.labels")
 
-# Model selection via Lasso 
+#' Model selection via Lasso 
 x_lasso <- c(covar, xt)
-#' using mlr package to create dummies for every factor variable
-# dt_lasso <- mlr::createDummyFeatures(as.data.frame(data_full[, -c("earnings")]),
-                                     # method = "reference")
 ps_lasso <- rlassologit(union~(.)^2, 
                         data = data_full[, c("union", ..x_lasso)])
 summary(ps_lasso, all = FALSE)
 terms_lasso <- names(coef(ps_lasso))[ps_lasso$index]
-
-#' Elastic net regularization with package glmnet
-# ps_net <- glmnet::glmnet(
-#   Matrix::sparse.model.matrix(union~(.)^2, 
-#                               data_full[, -c("earnings", "own_farm_income_last_year")]), 
-#   data_full$union, 
-#   family = "binomial"
-# ) 
 
 #' Model with full set of covariates!
 ps_all <- glm(union~(.)^2, family = "binomial",
@@ -362,12 +351,13 @@ li_bal[, norm_diff := .(abs(mean_1 - mean_0)/sqrt((var_1 + var_0)/2))]
 setcolorder(li_bal, c("model", "mean_0", "var_0", "mean_1", "var_1", "norm_diff"))
 
 # 6 Quality of PS ---------------------------------------------------------
-#Function that subdivides a given propensity score vector in subblocks
-#treat = vector with treatment assignments
-#lin.psm = vector with linearized PSs
-#K = how many covariates will we want to test/use in bias correction of estimates later on? 
-#t.max = threshold for tstat in making a further subdivide 
-#trim = should we discard extreme observations so there is overlap?
+#' Function that subdivides a given propensity score vector in subblocks
+#' treat = vector with treatment assignments
+#' lin.psm = vector with linearized PSs
+#' K = how many covariates will we want to test/use in bias correction of 
+#' estimates later on? 
+#' t.max = threshold for tstat in making a further subdivide 
+#' trim = should we discard extreme observations so there is overlap?
 #' Author: Luis Alvarez
 ps_blocks <- function(treat, lin.psm, K, t.max = 1.96,  trim = TRUE)
 {
@@ -455,7 +445,8 @@ summary_block_ir <-
   as_tibble() %>% 
 #' Using table.test by blocks and only on numerical variables
   group_by(block_ir) %>% 
-  summarise(t_stat = list(table.test(cur_data(), names(cur_data()), "union", "tstat"))) %>% 
+  summarise(t_stat = list(table.test(cur_data(), names(cur_data()), 
+                                     "union", "tstat"))) %>% 
   unnest(t_stat) %>% 
   filter(covar != "union") %>% 
   pivot_wider(covar, names_from = block_ir, values_from = tstat)
@@ -465,7 +456,8 @@ summary_block_lasso <-
   na.omit() %>% 
   as_tibble() %>% 
   group_by(block_lasso) %>% 
-  summarise(t_stat = list(table.test(cur_data(), names(cur_data()), "union", "tstat"))) %>% 
+  summarise(t_stat = list(table.test(cur_data(), names(cur_data()), 
+                                     "union", "tstat"))) %>% 
   unnest(t_stat) %>% 
   filter(covar != "union") %>% 
   pivot_wider(covar, names_from = block_lasso, values_from = tstat)
@@ -475,14 +467,16 @@ summary_block_all <-
   na.omit() %>% 
   as_tibble() %>% 
   group_by(block_all) %>% 
-  summarise(t_stat = list(table.test(cur_data(), names(cur_data()), "union", "tstat"))) %>% 
+  summarise(t_stat = list(table.test(cur_data(), names(cur_data()), 
+                                     "union", "tstat"))) %>% 
   unnest(t_stat) %>% 
   filter(covar != "union") %>% 
   pivot_wider(covar, names_from = block_all, values_from = tstat)
 
 #' Many of class_of_worker has problems in the t-stat. Probably due to lack of 
 #' observations
-obs_block_ir <- model.matrix(~.-1, data = data_full[, c(..cols_full, "block_ir")]) %>% 
+obs_block_ir <- model.matrix(~.-1, 
+                             data = data_full[, c(..cols_full, "block_ir")]) %>% 
   na.omit() %>% 
   as_tibble() %>% 
   dplyr::select(matches("class_of_worker"), "block_ir") %>% 
@@ -494,8 +488,8 @@ obs_block_ir <- model.matrix(~.-1, data = data_full[, c(..cols_full, "block_ir")
 #' removing from balance assessment.  
 #' 
 #' Re-blocking!! To assess number of treated and control by blocks with trim
-#' option set to false. This is the blocking config we will pass to the forthcomming
-#' subclassification procedure.
+#' option set to false. This is the blocking config we will pass to the 
+#' forthcomming subclassification procedure.
 data_full[, `:=`(block_ir = ps_blocks(union, li_ir, k_ir, trim = FALSE),
                  block_lasso = ps_blocks(union, li_lasso, k_lasso, trim = FALSE),
                  block_all = ps_blocks(union, li_all, k_all, trim = FALSE))]
@@ -733,7 +727,55 @@ ipw_reg <- ipw_weights %>%
               values_from = c(estimate:p.value)) %>% 
   dplyr::select(model, estimate_ATE, std.error_ATE, estimate_ATT, std.error_ATT)
 
-
-
+#' BONUS: Generalized Random Forest
+#' 
+#' 3 steps: i) Estimate a model for earnings; ii) Estimate a model for the 
+#' propensity score and; iii) Estimate the causal forest
+#'
+#' i) Model for earnings utilizes union and covariates of item 2 
+#' 
+Y <- data_full$earnings
+X <- model.matrix(~.-1+class_of_worker, data_full[, c("union", ..covar)])
+Y_forest <- regression_forest(X, Y)
+Y_hat <- predict(Y_forest)$predictions
+#' ii) Propensity score: Could use the propensity score models from before. But
+#' let's try a random forest too.
+ps_cols <- cols_full[!cols_full == "union"]
+W <- data_full$union
+X_ps <- model.matrix(~.-1+class_of_worker+class_of_worker_last_year, 
+                  data_full[, ..ps_cols])
+W_forest <- regression_forest(X_ps, W)
+W_hat <- predict(W_forest)$predictions
+#' iii) Causal forest
+cf <- causal_forest(X, Y, W, Y_hat, W_hat, tune.parameters = "all")
+#' Estimated ATE for every observation
+tau_hat <- predict(cf)$predictions
+#' ATE and ATT
+cf_ate <- average_treatment_effect(cf)
+cf_att <- average_treatment_effect(cf, "treated")
+#' Table with doubly-robust and causal forest effects
+cf_dr_effects <- ipw_reg %>% 
+  add_row(model = "Causal Forest", 
+          estimate_ATE = cf_ate["estimate"],
+          std.error_ATE = cf_ate["std.err"], 
+          estimate_ATT = cf_att["estimate"],
+          std.error_ATT = cf_att["std.err"])
+#' Get a sample tree
+tree <- get_tree(cf, 3)
+tree_plot <- plot(tree)
+#' Variable importance for causal estimation
+var_imp <- tibble(variable = colnames(X),
+                  importance = variable_importance(cf)) %>% 
+  arrange(desc(importance)) %>% 
+  filter(variable != "union") %>% 
+  mutate(variable = factor(variable, levels = variable))
+#' Check whether causal forest predictions are well calibrated.
+test_calibration(cf)
+#' Histograms of covariates by union status
+X_ipw <- data.frame(X) %>% 
+  mutate(ipw = ifelse(union == 1, 1/W_hat, 1/(1 - W_hat))) %>% 
+  pivot_longer(cols = -c(union, ipw),
+               names_to = "covariate",
+               values_to = "value")
 
 save.image("I/input/homework_II.RData")

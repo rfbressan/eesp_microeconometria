@@ -30,6 +30,7 @@ library(ggplot2)
 library(kableExtra)
 library(modelsummary)
 library(sandwich)
+library(grf)
 # library(stargazer)
 # library(texreg)
 load("input/homework_II.RData")
@@ -524,7 +525,86 @@ When comparing the methods of estimation, my personal preference is the doubly-r
 
 As a bonus exercise, I'll implement the algorithm due to @Wager2018 (also in [@Athey2019b]). This is the Generalized Random Forest, which extends the well regarded @Breiman2001 random forest. The authors provided an R package, [`grf`](https://grf-labs.github.io/grf/index.html), to implement their algorithm and another paper that exemplifies its usage on observational data, [@Athey2019].
 
+A short explanation of random forest is due. Random forest make predictions as an average of results in $b$ trees according to the following algorithm: 1) For each $b=1, \ldots, B$, draw a subsample $\mathcal{S}_{b} \subseteq\{1, \ldots, n\}$ ; 2) Grow a tree via recursive partitioning on each such subsample of the data; and 3) Make predictions as:
 
+$$
+\hat{\mu}(x)=\frac{1}{B} \sum_{b=1}^{B} \sum_{i=1}^{n} \frac{Y_{i} \mathbf{1}\left(\left\{X_{i} \in L_{b}(x), i \in \mathcal{S}_{b}\right\}\right)}{\left|\left\{i: X_{i} \in L_{b}(x), i \in \mathcal{S}_{b}\right\}\right|}
+$$
+where $L_b(x)$ denotes the leaf node from $b$ tree containing the observation $x$. Therefore the prediction is the average over all trees in the forest of the prediction for specific trees, which is just the average outcome of all samples that happen to be in the same leaf node as the observation $x$. A random forest prediction is an average of predictions made by individual trees.
+
+This random forest prediction can be used to model either the outcome, $\hat m(X)$ or the propensity score, $\hat e(X)$, or both. In the case of **out-of-bag** prediction, we estimate $\hat \mu^{(-i)}(X_i)$) by only considering those trees $b$ for which $i\notin\mathcal{S}_b$.
+
+If the conditional average treatment effect function is constant, $\tau(x)=\tau$ for all $x \in \mathcal{X},$ then the following estimator is semiparametrically efficient for $\tau$ under unconfoundedness [@Chernozhukov2018a]:
+
+$$
+\hat{\tau}=\frac{\frac{1}{n} \sum_{i=1}^{n}\left(Y_{i}-\hat{m}^{(-i)}\left(X_{i}\right)\right)\left(W_{i}-\hat{e}^{(-i)}\left(X_{i}\right)\right)}{\frac{1}{n} \sum_{i=1}^{n}\left(W_{i}-\hat{e}(-i)\left(X_{i}\right)\right)^{2}}
+$$
+
+And this is exactly a doubly-robust estimator for the average causal effect. Below in table \@ref(tab:cf-estimate) we present the ATE and ATT estimated by a causal random forest together with previously presented results from the doubly-robust estimator of item 10).
+
+```{r cf-estimate, results='asis'}
+kbl(cf_dr_effects, digits = 2, booktabs = TRUE,
+    caption = "Doubly-robust and Causal Forest estimates.",
+    col.names = c("Model", rep(c("Estimate", "Std.Error"), 2))) %>% 
+  kable_classic(full_width = FALSE) %>% 
+  kable_styling(latex_options = "HOLD_position") %>% 
+  row_spec(4, bold = TRUE) %>% 
+  add_header_above(c(" " = 1, "ATE" = 2, "ATT" = 2))
+```
+
+And the results now are quite different! According to this procedure, we do not reject the null hypothesis of zero effect for both ATE and ATT. 
+
+Just out of curiosity, we present below an exemplary tree from our causal forest in figure \@ref(fig:tree-plot) and variable importance to explain earnings variance in figure \@ref(fig:var-imp).
+
+```{r tree-plot, fig.cap="Tree example from the estimated causal forest.", fig.align='center'}
+knitr::include_graphics("tree_plot.png")
+```
+
+```{r var-imp, fig.cap = "Variable importance in explaning earnings variance.", fig.align='center'}
+ggplot(var_imp, aes(variable, importance)) +
+  geom_col() +
+  coord_flip() +
+  scale_x_discrete(limits = rev(levels(var_imp$variable))) +
+  theme_classic()
+```
+
+Two common diagnostics to evaluate if the identifying assumptions behind `grf` hold is a propensity score histogram and covariance balance plot. The overlap assumption requires a positive probability of treatment for each $X_i$. We have already done this kind of assessment in figure \@ref(fig:ps-hist).
+
+```{r cf-overlap, fig.cap="Overlap of propensity scores.", fig.align='center'}
+tibble(union = W, ps = W_hat) %>% 
+  ggplot(aes(ps)) +
+  geom_histogram(aes(y = stat(density)), color = "White", bins = 50) +
+  facet_grid(union~., 
+             labeller = labeller(union = c(`0` = "Not Union", `1` = "Union"))) +
+  labs(x = "Propensity score") +
+  theme_light()
+```
+
+One can also check that the continuous covariates are balanced across the treated and control group by plotting the inverse-propensity weighted histograms of all unities.
+
+```{r cf-histograms, fig.cap='Assessing continuous covariates balance.', fig.align='center'}
+X_ipw %>% 
+  filter(covariate %in% c("age", "age_2", "education")) %>% 
+ggplot(aes(value, weight = ipw, fill = factor(union))) +
+  geom_histogram(alpha = 0.5, position = "identity", bins = 30) +
+  facet_wrap(~covariate, scales = "free", ncol = 2) +
+  guides(fill = guide_legend(title = "Union")) +
+  theme_bw()
+```
+
+While for categorical or binary covariates we analyze their total count in each treatment group, by the levels the variable can assume.
+
+```{r cf-his-cat, fig.cap='Assessing binary covariates balance.', fig.align='center'}
+X_ipw %>% 
+  filter(!covariate %in% c("age", "age_2", "education")) %>% 
+ggplot(aes(factor(value), weight = ipw, fill = factor(union))) +
+  geom_bar(alpha = 0.8, position = "dodge") +
+  facet_wrap(~covariate, scales = "free", ncol = 2) +
+  guides(fill = guide_legend(title = "Union")) +
+  theme_bw()
+```
+
+We can see there is good amount of overlap among treatment groups and the balance of covariates seems to be very good.
 
 \newpage
 ### Annex A - Selected covariates
