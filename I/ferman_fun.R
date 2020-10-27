@@ -422,6 +422,8 @@ ferman_assessment <- function(df, model, assess_on, H0 = 0.0, nsim = 1000, alpha
 }
 
 
+# Propensity Score --------------------------------------------------------
+
 # Propensity score blocking -----------------------------------------------
 #Function that subdivides a given propensity score vector in subblocks
 #treat = vector with treatment assignments
@@ -659,4 +661,369 @@ trimming.imbens2 <- function(lin.ps)
     print(paste("Trimming threshold alpha is ",alpha.trim))
     return(plogis(lin.ps) <= 1 - alpha.trim &  plogis(lin.ps) >= alpha.trim)
   }
+}
+
+# Weak Instruments - IV ---------------------------------------------------
+
+#Code to implement the Olea Pflueger correction:
+#FS is
+#x= Z\pi +  R \gamma + epsilon
+
+#Arguments are 
+# edndogenous = character variable with name of dependent variable
+# instruments = character vector with name of instruments
+# vcov = variance matrix to be used in computing first stage, e.g. vcovCL for cluster robust
+# data = data.frame with data
+# controls = vector with controls to be included in refression. c() if no controls.
+# intercept = shoudl an intercept be included in formulas? Variable named intercept will be included among
+#             controls
+# weights = vector of weights, if weighted regression is desired
+# cluster = if vcov = vcovCL, the name of the cluster variable (defaults to NULL)
+# ... = additional arguments, to be passed to vcov function, e.g. degree of freedom correction
+olea_pflueger_f <- function(endogenous, instruments, vcov, data, controls = c(), 
+                            intercept = TRUE, weights = NULL, cluster = NULL, ...)
+{
+  # Early chechk for weights and cluster
+  if (!is.null(weights))
+    weights <- as.data.frame(data)[, weights]
+  if (!is.null(cluster))
+    cluster <- as.data.frame(data)[, cluster]
+  
+  if (length(controls) > 0)
+    data.kept = data[,c(endogenous,instruments, controls)] 
+  else 
+    data.kept = data[,c(endogenous,instruments)]
+  
+  keep_ind = complete.cases(data.kept)
+  
+  data.kept = data.kept[keep_ind,]
+  
+  Nobs = nrow(data.kept)
+  
+  if (intercept)
+  {
+    data.kept = cbind(data.kept, "intercept" = 1)
+    controls = c(controls, "intercept")
+  }
+  
+  if (length(controls) > 0)
+  {
+    # y = as.vector(residuals(lm(as.formula(paste(endogenous, "~ -1 + ", paste(controls,collapse = "+"),sep="")), data.kept)))
+    
+    Z = c()
+    
+    for (instrument in instruments)
+    {
+      if (is.null(weights))
+        z =  as.vector(residuals(lm(as.formula(paste(instrument, "~ -1 + ", paste(controls,collapse = "+"),sep="")), data.kept))) 
+      else
+        z =  as.vector(residuals(lm(as.formula(paste(instrument, "~ -1 + ", paste(controls,collapse = "+"),sep="")), data.kept, weights = weights[keep_ind])) )
+      
+      Z = cbind(Z, z)
+    }
+    
+  } else {
+    # y = as.vector(data.kept[,endogenous])
+    
+    Z = as.matrix(data[,instruments])
+    
+  }
+  
+  formula.fs = paste(endogenous,"~ -1 +",paste(c(instruments,controls),collapse = " + "))
+  
+  if(is.null(weights))
+    fs.reg = lm(as.formula(formula.fs), data.kept) 
+  else 
+    fs.reg = lm(as.formula(formula.fs), data.kept, 
+                weights = weights[keep_ind])
+  
+  # if(is.null(weights))
+  #   fs.reg = lm(y~Z-1) else fs.reg = lm(y~Z-1, weights = weights[keep_ind])
+  
+  coefs = fs.reg$coefficients[names(fs.reg$coefficients)%in%instruments]
+  
+  if(!is.null(cluster))
+    vcov_mat = vcov(fs.reg, cluster = cluster[keep_ind], ...) 
+  else 
+    vcov_mat = vcov(fs.reg, ...)
+  
+  #Restricting to only instruments
+  vcov_mat = vcov_mat[names(fs.reg$coefficients)%in%instruments,names(fs.reg$coefficients)%in%instruments]
+  
+  if (is.null(weights))
+    Q_Z_norm = (t(Z) %*% Z)/Nobs 
+  else {
+    # Q_Z_norm = t(Z)%*%diag(weights[keep_ind])%*%Z/Nobs
+    Z_w <- sapply(1:ncol(Z), function(j) weights[keep_ind]*Z[, j])
+    Q_Z_norm <- (t(Z_w) %*% Z_w)/Nobs
+  }
+  F_eff = t(coefs)%*%Q_Z_norm%*%coefs/sum(diag(vcov_mat%*%Q_Z_norm))
+  
+  
+  return(list("Nobs" = Nobs, "Effective F" = F_eff))
+}
+
+#AR test
+
+#Arguments are 
+# outcome = character variable with name of outcome variable of interest
+# edndogenous = character variable with name of endogenous variable
+# instruments = character vector with name of instruments
+# vcov = variance matrix to be used in pooled model.
+# data = data.frame with data
+# beta_0 = value under the null (defaults to 0)
+# controls = vector with controls to be included in refression. c() if no controls.
+# intercept = shoudl an intercept be included in formulas? Variable named intercept will be included among
+#             controls
+# weights = vector of weights, if weighted regression is desired
+# cluster = if vcov = vcovCL, the name of the cluster variable (defaults to NULL)
+# ... = additional arguments, to be passed to vcov function, e.g. degree of freedom correction
+
+anderson_rubin_test <- function(outcome, endogenous, instruments, vcov, data, beta_0=0, controls = c(), intercept = T, weights = NULL, cluster = NULL, ...)
+{
+  # Early chechk for weights and cluster
+  if (!is.null(weights))
+    weights <- as.data.frame(data)[, weights]
+  if (!is.null(cluster))
+    cluster <- as.data.frame(data)[, cluster]
+  
+  if(length(controls)>0)
+    data.kept = data[,c(outcome, endogenous,instruments, controls)] else data.kept = data[,c(outcome, endogenous,instruments)]
+    
+    keep_ind = complete.cases(data.kept)
+    
+    data.kept = data.kept[keep_ind,]
+    
+    Nobs = nrow(data.kept)
+    
+    if(intercept)
+    {
+      data.kept = cbind(data.kept, "intercept" = 1)
+      controls = c(controls, "intercept")
+    }
+    
+    #We will pool outcome and endogenous now
+    data.pooled = rbind(data.kept, data.kept)
+    
+    data.pooled$pool_variable = c(data.kept[,outcome], data.kept[,endogenous])
+    data.pooled$variable_indicator = as.factor(c(rep("reduced_form",    Nobs),rep("first_stage",Nobs)))
+    
+    
+    
+    #Constructing the formula for regression
+    if(length(controls)>0)
+      formula = paste("pool_variable ~ -1 + ", paste(paste("variable_indicator", instruments, sep = ":"),collapse = "+"), "+", paste(paste("variable_indicator", controls, sep = ":"))) else  formula = paste("pool_variable ~ -1 +", paste(paste("variable_indicator", instruments, sep = ":"),collapse = "+")) 
+    
+    
+    if(is.null(weights))
+      pool.model = lm(formula, data.pooled) else  pool.model = lm(formula, data.pooled, weights = weights[rep(keep_ind,2)]) 
+    
+    coefs = pool.model$coefficients
+    
+    if(!is.null(cluster))
+      vcov_model = vcov(pool.model,cluster = rep(data[keep_ind, cluster],2), ...) else vcov_model = vcov(pool.model, ...)
+    
+    
+    lin_vec = 1*grepl(paste("reduced_form", instruments, sep = ":"), names(coefs)) - 
+      beta_0*grepl(paste("first_stage", instruments, sep = ":"), names(coefs))
+    
+    #constructing test statistic
+    val = (coefs%*%lin_vec)
+    vcov_lin = t(lin_vec)%*%vcov_model%*%lin_vec
+    
+    ar = val%*%solve(vcov_lin)%*%val
+    
+    pvalue =1 - pchisq(ar, 1)
+    
+    return(list("AR test statistic" = ar, "P-value" = pvalue, "Nobs" = Nobs))
+}
+
+#AR CI
+
+#Arguments are 
+# outcome = character variable with name of outcome variable of interest
+# edndogenous = character variable with name of endogenous variable
+# instruments = character vector with name of instruments
+# vcov = variance matrix to be used in pooled model.
+# data = data.frame with data
+# grid_beta = grid over which to perform grid search. Beta is the parameter of
+#             interest in the IV regression
+# confidence = confidence level for CI (defaults to 0.95)
+# controls = vector with controls to be included in refression. c() if no controls.
+# intercept = shoudl an intercept be included in formulas? Variable named intercept will be included among
+#             controls
+# weights = column name in data giving the desired observations weight
+# cluster = if vcov = vcovCL, the name of the cluster variable (defaults to NULL)
+# ... = additional arguments, to be passed to vcov function, e.g. degree of freedom correction
+
+anderson_rubin_ci <- function(outcome, endogenous, instruments, vcov, data, 
+                              grid_beta, confidence = 0.95, controls = c(), 
+                              intercept = TRUE, weights = NULL, 
+                              cluster = NULL, ...)
+{
+  # Early chechk for weights and cluster
+  if (!is.null(weights))
+    weights <- as.data.frame(data)[, weights]
+  if (!is.null(cluster))
+    cluster <- as.data.frame(data)[, cluster]
+  
+  if (length(controls) > 0)
+    data.kept = data[,c(outcome, endogenous,instruments, controls)] 
+  else 
+    data.kept = data[,c(outcome, endogenous,instruments)]
+  
+  keep_ind = complete.cases(data.kept)
+  
+  data.kept = data.kept[keep_ind,]
+  
+  Nobs = nrow(data.kept)
+  
+  if (intercept){
+    data.kept = cbind(data.kept, "intercept" = 1)
+    controls = c(controls, "intercept")
+  }
+  
+  #We will pool outcome and endogenous now
+  data.pooled = rbind(data.kept, data.kept)
+  
+  data.pooled$pool_variable = c(data.kept[,outcome], data.kept[,endogenous])
+  data.pooled$variable_indicator = as.factor(c(rep("reduced_form",    Nobs),rep("first_stage",Nobs)))
+  
+  
+  
+  #Constructing the formula for regression
+  if(length(controls)>0)
+    formula = paste("pool_variable ~ -1 + ", paste(paste("variable_indicator", instruments, sep = ":"),collapse = "+"), "+", paste(paste("variable_indicator", controls, sep = ":"),collapse = "+")) 
+  else  
+    formula = paste("pool_variable ~ -1 +", paste(paste("variable_indicator", instruments, sep = ":"),collapse = "+")) 
+  
+  
+  if(is.null(weights))
+    pool.model = lm(formula, data.pooled) 
+  else  {
+    pool_weights <- rep(weights[keep_ind], 2)
+    pool.model = lm(as.formula(formula), data = data.pooled, 
+                    weights = pool_weights) 
+  }
+  coefs = pool.model$coefficients
+  
+  if(!is.null(cluster))
+    vcov_model = vcov(pool.model, cluster = rep(cluster[keep_ind],2), ...) 
+  else 
+    vcov_model = vcov(pool.model, ...)
+  
+  p1 = grepl(paste("reduced_form", instruments, sep = ":"), names(coefs))
+  p2 = grepl(paste("first_stage", instruments, sep = ":"), names(coefs))
+  
+  acc_vec = c() 
+  
+  #Looping over grid
+  for(beta in grid_beta)
+  {
+    
+    lin_vec = p1 - beta*p2
+    #constructing test statistic
+    val = (coefs%*%lin_vec)
+    vcov_lin = t(lin_vec)%*%vcov_model%*%lin_vec
+    
+    ar = val%*%solve(vcov_lin)%*%val
+    
+    pvalue = pchisq(ar, 1)
+    
+    if(pvalue<= confidence)
+      acc_vec = c(acc_vec, T) else acc_vec = c(acc_vec, F)
+    
+  }
+  
+  if(sum(acc_vec) == 0)
+    return("Confidence set is empty!") else {
+      
+      vec_region_start = c()
+      vec_region_end = c()
+      if(acc_vec[1] == TRUE)
+      {
+        warning("Lower boundary point was accepted! Perhaps decrease grid lower bound to see what happens?")
+        vec_region_start = grid_beta[1]
+      }
+      
+      if(acc_vec[length(acc_vec)] == TRUE)
+      {
+        warning("Upper boundary point was accepted! Perhaps increase grid upper bound to see what happens?")
+        vec_region_end = grid_beta[length(acc_vec)]
+      }
+      
+      vec_region_start = c(vec_region_start, grid_beta[c(FALSE,diff(acc_vec)==1)]  )
+      vec_region_end = c(grid_beta[c(diff(acc_vec) ==-1, FALSE)],vec_region_end)
+      
+      # CI.text = paste(paste("[",vec_region_start, ",", vec_region_end, "]"),collapse = " U ")
+      
+      return(c(vec_region_start, vec_region_end))
+    }
+}
+
+#' Manski bounds with MTR and MTS
+#' Computes the ATE's upper bound based on the MTS assumption.
+#' $t\geq s \implies E[y(w)|z=t]\geq E[y(w)|z=s]$.
+#' @param data Data Frame
+#' @param outcome Name of outcome variable
+#' @param treatment Name of treatment variable
+#' @param treat_levels Vector with levels of treatment where ATE's UB will be 
+#' computed.
+#' 
+#' All variable's names must be **unquoted**.
+#' 
+#' @return A data frame with treatment levels and their upper bound on ATE.
+ate_ub <- function(data, outcome, treatment, treat_levels) {
+  treat_levels <- sort(treat_levels)
+  treat_vec <- data %>% 
+    distinct({{treatment}}) %>% 
+    arrange({{treatment}}) %>% 
+    pull()
+  if (!all(treat_levels %in% treat_vec))
+    stop("All treatment levels must be in the data.")
+  # Conditional expectations and probabilities
+  exp_probs <- data %>% 
+    select(c({{outcome}}, {{treatment}})) %>% 
+    group_by({{treatment}}) %>% 
+    summarise(average = mean({{outcome}}), 
+              probability = n()/nrow(.),
+              size = n()) %>% 
+    mutate(avg_prob = average * probability) %>% 
+    arrange({{treatment}})
+  
+  ub <- vector("numeric", length = length(treat_levels))
+  n_treats <- nrow(exp_probs)
+  
+  for (i in seq_along(treat_levels)) {
+    t <- treat_levels[i]
+    t_idx <- which(treat_vec == t)
+    s <- treat_vec[t_idx - 1]
+    sum_t_plus <- exp_probs %>% 
+      filter({{treatment}} > t) %>% 
+      summarise(sum(avg_prob)) %>% 
+      pull()
+    sum_s_less <- exp_probs %>% 
+      filter({{treatment}} < s) %>% 
+      summarise(sum(avg_prob)) %>% 
+      pull()
+    exp_y_t <- exp_probs %>% 
+      filter({{treatment}} == t) %>% 
+      pull(average)
+    exp_y_s <- exp_probs %>% 
+      filter({{treatment}} == s) %>% 
+      pull(average)
+    prob_t_leq <- exp_probs %>% 
+      filter({{treatment}} <= t) %>% 
+      summarise(sum(probability)) %>% 
+      pull()
+    prob_s_geq <- exp_probs %>% 
+      filter({{treatment}} >= s) %>% 
+      summarise(sum(probability)) %>% 
+      pull()
+    upper_bound <- sum_t_plus + exp_y_t * prob_t_leq - (sum_s_less + exp_y_s * prob_s_geq)
+    
+    ub[i] <- upper_bound
+  }
+  
+  return(data.frame(treat_levels = treat_levels, upper_bound = ub))
 }
