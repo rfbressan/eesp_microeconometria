@@ -9,6 +9,13 @@ library(lmtest)
 library(modelsummary)
 library(fixest)
 library(AER)
+library(dtplyr)
+library(rdrobust)
+library(rddensity)
+library(rdd)
+library(foreach)
+library(doParallel)
+
 
 #' Part 1 Instrumental variables
 #' Load data
@@ -24,8 +31,9 @@ lg_census2010 <- lg_census2010 %>%
 #' of number of children. Use sample weight (person_weight)
 educ_tab <- lg_census2010 %>% 
   group_by(family_number_children) %>% 
-  summarise(avg_school = mean(first_child_years_of_education, na.rm = TRUE),
-            frequency = sum(person_weight))
+  summarise(frequency = sum(person_weight),
+            avg_school = sum(first_child_years_of_education*person_weight)/frequency) %>% 
+  select(family_number_children, avg_school, frequency)
 educ_tab
 #' Total population represented
 sum(educ_tab$frequency)
@@ -34,14 +42,15 @@ sum(educ_tab$frequency)
 #' 
 #' ManskiPepper2000 table 1
 manski_tbl1 <- lg_census2010 %>% 
-  select(c(first_child_years_of_education, family_number_children)) %>% 
+  select(c(first_child_years_of_education, family_number_children, 
+           person_weight)) %>% 
   group_by(family_number_children) %>% 
-  summarise(average = mean(first_child_years_of_education), 
-            probability = n()/nrow(.),
-            size = n()) %>% 
+  summarise(average = weighted.mean(first_child_years_of_education, person_weight), 
+            prob = sum(person_weight)/sum(lg_census2010$person_weight),
+            size = sum(person_weight)) %>% 
   arrange(family_number_children)
 #' Manski bounds with MTR and MTS
-ate_ub <- function(data, outcome, treatment, treat_levels) {
+ate_ub <- function(data, outcome, treatment, treat_levels, weight) {
   treat_levels <- sort(treat_levels)
   treat_vec <- data %>% 
     distinct({{treatment}}) %>% 
@@ -49,14 +58,15 @@ ate_ub <- function(data, outcome, treatment, treat_levels) {
     pull()
   if (!all(treat_levels %in% treat_vec))
     stop("All treatment levels must be in the data.")
-  # Conditional expectations and probabilities
+  # Conditional expectations and probabilities. 
+  # data must be the manski_tbl1 format
+  sum_weights <- data %>% select({{weight}}) %>% pull() %>% sum() 
   exp_probs <- data %>% 
-    select(c({{outcome}}, {{treatment}})) %>% 
+    select(c({{outcome}}, {{treatment}}, {{weight}})) %>% 
     group_by({{treatment}}) %>% 
-    summarise(average = mean({{outcome}}), 
-              probability = n()/nrow(.),
-              size = n()) %>% 
-    mutate(avg_prob = average * probability) %>% 
+    summarise(average = weighted.mean({{outcome}}, {{weight}}), 
+              prob = sum({{weight}})/sum_weights,
+              size = sum({{weight}})) %>% 
     arrange({{treatment}})
   
   ub <- vector("numeric", length = length(treat_levels))
@@ -68,11 +78,11 @@ ate_ub <- function(data, outcome, treatment, treat_levels) {
     s <- treat_vec[t_idx - 1]
     sum_t_plus <- exp_probs %>% 
       filter({{treatment}} > t) %>% 
-      summarise(sum(avg_prob)) %>% 
+      summarise(sum(average*prob)) %>% 
       pull()
     sum_s_less <- exp_probs %>% 
       filter({{treatment}} < s) %>% 
-      summarise(sum(avg_prob)) %>% 
+      summarise(sum(average*prob)) %>% 
       pull()
     exp_y_t <- exp_probs %>% 
       filter({{treatment}} == t) %>% 
@@ -82,11 +92,11 @@ ate_ub <- function(data, outcome, treatment, treat_levels) {
       pull(average)
     prob_t_leq <- exp_probs %>% 
       filter({{treatment}} <= t) %>% 
-      summarise(sum(probability)) %>% 
+      summarise(sum(prob)) %>% 
       pull()
     prob_s_geq <- exp_probs %>% 
       filter({{treatment}} >= s) %>% 
-      summarise(sum(probability)) %>% 
+      summarise(sum(prob)) %>% 
       pull()
     upper_bound <- sum_t_plus + exp_y_t * prob_t_leq - (sum_s_less + exp_y_s * prob_s_geq)
     
@@ -96,40 +106,60 @@ ate_ub <- function(data, outcome, treatment, treat_levels) {
   return(data.frame(treat_levels = treat_levels, upper_bound = ub))
 }
 #' Estimate of LB
+#' Wrong sign. Just checking
 ate_lb_est <- ate_ub(lg_census2010, first_child_years_of_education, 
-                     family_number_children, (2:6)) %>% 
+                     family_number_children, (2:16), person_weight) %>% 
   rename(lb_est = upper_bound)
+#' Changing sign They are the same!! Compute upper bound and say it is lower 
+#' is the same as changing signs, compute UB then change sign back again to 
+#' lower
+#' 
 #' Bootstrapping for Lower Bound confidence
 #' Results in unique households and their weights
+
 lg_household <- lg_census2010 %>% 
   select(id_household, household_weight) %>% 
   group_by(id_household) %>% 
   summarise(household_weight = first(household_weight))
 
-nrep <- 100
+nrep <- 200
 n_sample <- nrow(lg_household)
-ate_lb_boot <- vector("list", length = nrep)
-for (i in 1:nrep) {
+#' Using foreach
+#' Register doParallel backend for parallel computation of bootstrap
+cl <- makePSOCKcluster(3)
+registerDoParallel(cl)
+
+ate_lb_df <- foreach(i = 1:nrep, .combine = "rbind", .packages = "dplyr") %dopar% {
   boot <- sample(n_sample, replace = TRUE, 
-                 prob = lg_household$household_weight)
+                 # prob = lg_household$household_weight
+  )
+  
   lg_hh_boot <- lg_household[boot, "id_household"] %>% 
     left_join(lg_census2010 %>% 
                 select(id_household, first_child_years_of_education, 
-                       family_number_children), 
+                       family_number_children, person_weight), 
               by = "id_household")
   
-  ate_lb_boot[[i]] <- lg_hh_boot %>% 
-    ate_ub(first_child_years_of_education, family_number_children, (2:6))
+  lg_hh_boot %>% 
+    ate_ub(first_child_years_of_education, family_number_children, (2:6), 
+           person_weight)
 }
-rm(lg_hh_boot)
+stopCluster(cl)
+gc() # Garbage collector to clean up memory
 
-ate_lb_df <- do.call(rbind, ate_lb_boot) %>% 
+#' Faceted plot of lower bounds histograms
+lb_hist <- ggplot(ate_lb_df, aes(upper_bound, group = treat_levels)) +
+  geom_histogram(bins = 20) +
+  facet_wrap(~treat_levels, scales = "free") +
+  labs(x = "Lower bound") +
+  theme_classic()
+
+manski_tbl2 <- ate_lb_df %>% 
   group_by(treat_levels) %>% 
-  summarise(quant025 = quantile(upper_bound, probs = 0.025)) %>% 
+  summarise(quant05 = quantile(upper_bound, probs = 0.05)) %>% 
   mutate(s_treat = treat_levels - 1) %>% 
   left_join(ate_lb_est, by = "treat_levels") %>% 
-  select(s_treat, treat_levels, lb_est, quant025)
-
+  select(s_treat, treat_levels, lb_est, quant05)
 
 #' Question 2
 #' a) Multiple births in second birth (second child are twins)
@@ -409,7 +439,51 @@ ar_ci_txt <- paste0("[", format(ar_ci[1], digits = 4), ", ",
 iv_ci <- coefci(iv_est1)['family_number_children',]
 iv_ci_txt <- paste0("[", format(iv_ci[1], digits = 4), ", ",
                     format(iv_ci[2], digits = 4), "]")
-#' e) 
+
+#' PART II RDD
+#' 
+#' Load data and drop unities with NA for treat or running
+panes <- data.table::fread("II/input/amarante2016.csv", encoding = "Latin-1",
+                           na.strings = "")[!is.na(treat) & !is.na(running)]
+# lg_panes <- data.table::fread("II/input/amarante2016.csv", encoding = "Latin-1")
+
+#' 2) Plots of treat versus running and bajo2500 versus running
+rdplot(panes$treat, panes$running, binselect = 'es', ci = 95)
+
+#' 3) Local linear regression
+#' Using the rdd package
+# rdd_model <- RDestimate(bajo2500~running+treat, data = panes, model = TRUE)
+#' Using rdrobust package
+tri_model <- rdrobust(panes$bajo2500, panes$running, 
+                      fuzzy = panes$treat, kernel = "tri", all = TRUE)
+uni_model <- rdrobust(panes$bajo2500, panes$running, 
+                      fuzzy = panes$treat, kernel = "uni", all = TRUE)
+#' First stage using the bandwidth from fuzzy model
+tri_bw <- tri_model$bws["h", ]
+tri_first <- rdrobust(panes$treat, panes$running, kernel = "tri", all = TRUE)
+
+# Extract Data Values
+table1 <- data.frame(uni_model$coef, uni_model$se, uni_model$pv)
+table2 <- data.frame(tri_model$coef, tri_model$se, tri_model$pv)
+rdd_met <- rep(rownames(table1), 2)
+est_tab <- cbind(rdd_met, rbind(table1, table2))
+rownames(est_tab) <- NULL
+colnames(est_tab) <- c("Method", "Estimate", "Std.Error", "P-value")
+
+#' 4) Placebo tests
+#' Gestational length in weeks: semgest
+#' Week first prenatal visit: semprim
+#' Number of previous pregnancies: numemban
+placebo_m1 <- rdrobust(panes$semgest, panes$running, 
+                           fuzzy = panes$treat, kernel = "tri", all = TRUE)
+# placebo_m2 <- rdrobust(panes$semprim, panes$running, 
+#                            fuzzy = panes$treat, kernel = "tri", all = TRUE)
+# placebo_m3 <- rdrobust(panes$numemban, panes$running, 
+#                            fuzzy = panes$treat, kernel = "tri", all = TRUE)
+#' 5) Manipulation test with rddensity
+manipulation <- rddensity(panes$running)
+manip_plot <- rdplotdensity(manipulation, panes$running)
+
 
 #' Do not save large dataframes that start with "lg_"
 save(list = ls()[!grepl("^lg_.*", ls())], file = "II/input/homework_I.RData")

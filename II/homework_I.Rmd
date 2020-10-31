@@ -34,9 +34,11 @@ library(AER)
 library(modelsummary)
 library(sandwich)
 library(lmtest)
+library(rdrobust)
+library(rddensity)
 # library(grf)
-library(stargazer)
-library(texreg)
+# library(stargazer)
+# library(texreg)
 load("input/homework_I.RData")
 ```
 
@@ -153,7 +155,7 @@ Therefore, for a multi-level treatment we can expect the same phenomenon to occu
 (\#eq:lower-bound)
 \end{equation}
 
-Bellow we present a table with empirical mean of years of study and the distribution number of children across families, a la Table I in @Manski2000.
+Below we present a table with empirical mean of years of study and the distribution number of children across families, a la Table I in @Manski2000.
 
 ```{r manski-tbl, resutls='asis'}
 kbl(manski_tbl1, digits = 4, booktabs = TRUE,
@@ -166,12 +168,18 @@ kbl(manski_tbl1, digits = 4, booktabs = TRUE,
 In table \@ref(tab:lower-bound) we have the estimated lower bound for the causal effect and the 5% bootstrap quantile, as in @Manski2000 Table II.
 
 ```{r lower-bound, results='asis'}
-kbl(ate_lb_df, digits = 4, booktabs = TRUE,
+kbl(manski_tbl2, digits = 4, booktabs = TRUE,
     caption = "Lower bound on years of study for first child.",
     col.names = c("s", "t", "Estimate", "5% quantile")) %>% 
   kable_classic(full_width = FALSE) %>% 
   add_header_above(c(" " = 2, "Lower Bound on Delta(s,t)" = 2)) %>% 
   kable_styling(latex_options = c("HOLD_position"))
+```
+
+As a complementary analysis of our resampling method, we present below the histograms of bootstrapped lower bounds by treatment level $t$.
+
+```{r lb-hist, fig.cap="Distribution of bootstrapped lower bounds"}
+lb_hist
 ```
 
 **Question 2** In this item, we will use an instrumental-variable approach in estimating the causal impact of the number of children on years of schooling of the first child. We will follow the approach in @ponczek2012new, whereby we first restrict our sample to families with two or more births from the couple (variable `family_number_births` $\geq 2$ ). We then propose to instrument the number of children with `second_birth_ismultiplebirth`, which indicates whether the second birth of the couple was a multiple birth [3]
@@ -240,7 +248,7 @@ We run the AR confidence interval for model 2, with control variables. The confi
 
 _(e) Compare your results with the estimates found in Question 1._
 
-**COMPARE TO ATE RESULTS FROM ITEM 1 C)**
+We can see that the confidence interval found using the Anderson-Rubin method is tighter than the bounds found in item 1 c) using Manski's approach, in general. Although, for smaller number of children in the family, the lower bound in table \@ref(tab:lower-bound) are tighter than the confidence interval just found. 
 
 # Part 2: Regression discontinuity design
 
@@ -248,16 +256,104 @@ For this part of the list, you have been provided with data from @amarante2016ca
 
 You have been provided with a dataset where each entry corresponds to a pair (birth,mother) during the program duration. The treatment indicator variable is treat. The eligibility dummy is `eligible` $=\mathbf{1}\{\text{running} > 0\}$, where running is the predicted probability of falling to poverty, already subtracted of the threshold for program eligibility. File `dic_amarante.pdf` contains the description of additional variables in the dataset.
 
-1. State the assumptions required for the identification of a treatment effect using the discontinuity described above. What do these assumptions mean in this context? What is the interpretation of the treatment effect identified under these assumptions?
+_1. State the assumptions required for the identification of a treatment effect using the discontinuity described above. What do these assumptions mean in this context? What is the interpretation of the treatment effect identified under these assumptions?_
+
+The discontinuity just described is a fuzzy one, the probability of receiving the cash transfer even when the running variable is lower than the specified threshold is above zero while that probability in below one if the individual's running variable is over the threshold. 
+
+Therefore, the key assumptions for the Fuzzy RDD model are:
+
+i) Potential outcomes are continuous in the running variable $x$ at the cutoff value $\bar x$, such that the following limits exist
+
+$$\lim_{x\uparrow \bar x}E[Y_i|x=\bar x] \text{ and } \lim_{x\downarrow \bar x}E[Y_i|x=\bar x]$$
+this means that we can compare unities just below the cutoff which had not received treatment and unities above the cutoff which did have been treated, in other words, we can compare the outcomes of compliers.
+
+ii) Potential treatments must be discontinuous at $x=\bar x$. This ensures there is still a discontinuity on the probability of getting treated at $x=\bar x$, although not sharp. Also, this hypothesis is related to the identification of causal effect, since it makes the so called first stage different from zero.
+
+$$\lim_{x'\uparrow \bar x}P(D_i = 1|x=x')\neq \lim_{x'\downarrow \bar x}P(D_i = 1|x=x')$$
+This hypothesis is the monotonicity hypothesis without being explicit about the direction of the relation between the running variable and treatment. 
+
+iii) Independence of potential outcomes from treatment status at $x=\bar x$. This is the usual hypothesis of conditional unconfoundedness, but this time we need it to hold at the cutoff value.
+
+$$Y_i(1), Y_i(0) \perp D_i|x=\bar x$$
+
+Since the Fuzzy RDD is similar in nature to an IV approach, we also need two assumptions from instrumental variables, relevance of the running variable and the exclusion restriction, where the running variable does not directly affects the outcome.
+
+Without hypothesis iii) of conditional independence, the treatment effect estimated under a Fuzzy RDD is the Local Average Treatment Effect -- LATE -- which is the effect on compliers, for those with $x=\bar x$. If we impose conditional independence of potential outcomes from treatment at the cutoff value, then the Average Treatment Effect -- ATE -- is recovered[^1].
+
+[^1]: From a preliminary draft of [A Practical Introduction to Regression Discontinuity Designs: Extensions](https://cattaneo.princeton.edu/books/Cattaneo-Idrobo-Titiunik_2018_CUP-Vol2.pdf), p. 88.
 
 2. Report a discontinuity plot between the running variable (x-axis) and program participation (y-axis), as well as a discontinuity plot between the running variable (x-axis) and low birthweight (variable `bajo2500`). What do these plots tell you?
 
+Since we have so many observed units, the scatter plots asked would be clogged with points at $Y = \{0, 1\}$ and would be uninformative. Thus, we opted instead, to cut the running variable into bins and compute y-axis variable's average on a given bin. The point estimate and the $\pm$ one standard error are provided in the following plots.
+
+```{r exp-treat, fig.cap="Probability of getting treated."}
+rdplot(panes$treat, panes$running, binselect = 'es', ci = 95,
+       kernel = "triangular", 
+       x.label = "Running (X)", y.label = "E[T|X]")
+```
+
+
+```{r exp-bajo2500, fig.cap="Probability of having a child weighting 2.5Kg or less at birth."}
+rdplot(panes$bajo2500, panes$running, binselect = 'es', ci = 95,
+       kernel = "triangular", p = 4,
+       x.label = "Running (X)", y.label = "E[Y|X]")
+```
+
+Figure \@ref(fig:exp-treat) provides a picture for the discontinuity of the probability of getting treated at $x=0$, although it is not sharp, there is a clear jump on the point estimate at the cuttof value. On the other hand, the probability of having a low weight child does not appear to change at all at the specified cutoff value, as can be seen in Figure \@ref(fig:exp-bajo2500).
+
 3. Estimate the effect of program participation on low birthweight by local linear regression. Precisely state the bandwidth selection method used, the choice of kernel, as well as whether bias correction was employed. What is the first-stage relation, at the cutoff, between program eligibility and program participation? Is it statistically significant? Comment on your second stage results.
+
+Below we present the results (second stage) of our estimations using two kernels, triangular and uniform, for comparison.
+
+```{r rdd, results='asis'}
+kbl(est_tab, digits = 4, booktabs = TRUE,
+    caption = "RDD estimates. Triangular and Uniform kernels.") %>%
+  kable_classic(full_width = FALSE) %>% 
+  kable_styling(latex_options = c("HOLD_position")) %>% 
+  pack_rows("Uniform", 1, 3) %>% 
+  pack_rows("Triangular", 4, 6)
+```
+
+
+Optimal bandwidth was calculated according to the Calonico et al. method as implemented in the R package `rdrobust`. We report bias corrected estimate and variance (Robust), only estimate (Bias-Corrected) and no correction at all (Conventional). 
+
+The second stage results show NO EFFECT of Panes program on the probability of giving birth to a low weight child. The result is robust to kernel choice and bias correction.
+
+The first stage relation is the effect of running variable in the probability of getting the treatment, at the cutoff value. This relation is positive and significant according to our results below. This was expected, since Figure \@ref(fig:exp-treat) showed a relevant positive discontinuity at the cutoff value.
+
+```{r first-stage}
+summary(tri_first)
+```
+
 
 4. In order to assess the credibility of your empirical strategy, choose a variable which you may argue is predetermined and estimate the effect of program participation at the cutoff as in the previous item. What do you find?
 
+We have chosen the gestational length in weeks, `semgest` as a placebo variable, since it is mainly determined by biological traits of the mother and the PANES program has no influence on these traits. This is a predetermined variable, the cash-transfer program should have no effect on this outcome and this is indeed the case as shown in results below. 
+
+```{r placebo}
+summary(placebo_m1)
+```
+
 5. Implement a manipulation test for the running variable in your setting. What do you find?
 
+We implemented the test suggested by @Cattaneo2020 and visually inspecting the plot below we are not able to reject the null hypothesis of no manipulation in the running variable.
+
+```{r manipulation, fig.cap="Manipulation test on PANES program"}
+manip_plot$Estplot
+```
+
+A summary of this test is provided below.
+
+```{r manip-summ}
+summary(manipulation)
+```
+
 6. Do you think there are any potential threats to identification and/or estimation in your context? Can you think of any strategies to circumvent these?
+
+In the fuzzy regression discontinuity design, one of the assumptions for identification is inherited from instrumental variable theory, the exclusion restriction. The PANES program was designed with eligibility (i.e. the running variable) based on a probit model estimated from a baseline survey, and it was target to the poorest 10% of households. The exclusion restriction demands that the running variable does not directly impact the outcome, which in our study is child's low weight at birth. Although, we can easily think of being poor (as the running variable is a proxy for it) is directly linked with the child weight at birth, since it is likely the mother does not eat well and enough, specially for the poorest.
+
+This fact would invalidate our running variable as an instrument, and the way to circumvent this would be to choose another variable from the survey to be the instrument. This new variable should attend both the exclusion restriction and be correlated to the probability of being treated (the relevance condition). The later condition can be met by choosing a variable that was significant in the probit model for eligibility.
+
+Also, for the estimation of a RDD, one must always be very careful about the extrapolation needed when utilizing unities that are not exactly at the cutoff value. @Gelman2019 argue that polynomials of order greater than two should not be used in local regressions. High order polynomials are very sensitive to the inclusion of observations and may lead erroneous extrapolation toward the cutoff. We try to avoid this pitfall by using local _linear_ regression and choosing a very tight bandwidth. Also  
 
 ## References
