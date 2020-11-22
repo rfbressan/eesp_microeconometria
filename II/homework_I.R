@@ -122,7 +122,7 @@ lg_household <- lg_census2010 %>%
   group_by(id_household) %>% 
   summarise(household_weight = first(household_weight))
 
-nrep <- 200
+nrep <- 1000
 n_sample <- nrow(lg_household)
 #' Using foreach
 #' Register doParallel backend for parallel computation of bootstrap
@@ -131,7 +131,7 @@ registerDoParallel(cl)
 
 ate_lb_df <- foreach(i = 1:nrep, .combine = "rbind", .packages = "dplyr") %dopar% {
   boot <- sample(n_sample, replace = TRUE, 
-                 # prob = lg_household$household_weight
+                 prob = lg_household$household_weight
   )
   
   lg_hh_boot <- lg_household[boot, "id_household"] %>% 
@@ -156,10 +156,11 @@ lb_hist <- ggplot(ate_lb_df, aes(upper_bound, group = treat_levels)) +
 
 manski_tbl2 <- ate_lb_df %>% 
   group_by(treat_levels) %>% 
-  summarise(quant05 = quantile(upper_bound, probs = 0.05)) %>% 
+  summarise(quant025 = quantile(upper_bound, probs = 0.025),
+            quant975 = quantile(upper_bound, probs = 0.975)) %>% 
   mutate(s_treat = treat_levels - 1) %>% 
   left_join(ate_lb_est, by = "treat_levels") %>% 
-  select(s_treat, treat_levels, lb_est, quant05)
+  select(s_treat, treat_levels, lb_est, quant025, quant975)
 
 #' Question 2
 #' a) Multiple births in second birth (second child are twins)

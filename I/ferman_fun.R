@@ -280,60 +280,68 @@ compute.mde.bilateral <- function(alpha, se, kappa, step.grid = 1e-3)
 #b: value of coefficient under the null. Defaults to 0
 #S: Number of replications of step 2 in algorithm. Defaults to 1000
 #dataset with variables
-wild.bs <- function(formula, coef.to.test, cluster.var, data, b = 0, S = 1000)
+wild.bs <- function(data, formula, coef.to.test, cluster.var, weight.var = NULL,
+                    b = 0, S = 1000)
 {
-  formula.text = as.character(formula)
-  
+  stopifnot(is_tibble(data))
+  # No spaces allowed in model formula
+  formula <- gsub("\\s+", "", formula)
+  depvar <- sub("~.+", "", formula)
+  # Weighted regression
+  if (!is.null(weight.var)) 
+    weight.vec <- data %>% pull(weight.var)
+  else
+    weight.vec <- NULL
   #Imposing the null in formula
-  formula.null = paste(
-    formula.text[2], "~", gsub(coef.to.test, paste("offset(b*",coef.to.test,")", sep = ""),
-                               formula.text[3]))
+  formula.null <- gsub(coef.to.test, 
+                       glue::glue("offset(b*{coef.to.test})"),
+                       formula)
   
-  modelo.nulo = lm(as.formula(formula.null), data = data)
+  modelo.nulo <- lm(as.formula(formula.null), weights = weight.vec, data = data)
   
-  cluster.data = cbind("Cluster" = data[,cluster.var])
+  cluster.data <- data[, cluster.var]
   
-  cluster.indexes = unique(cluster.data[,1])
+  cluster.indexes <- unique(cluster.data)
   
-  C = length(cluster.indexes)
+  C <- length(cluster.indexes)
   
-  vec_unstud = c()
-  vec_stud = c()
+  vec_unstud <- c()
+  vec_stud <- c()
   
-  data.artificial  = data
+  data.artificial <- data
   
   for (s in 1:S)
   {
     e_s = 1 - 2*rbinom(C, 1, 0.5)
     
-    vals.cluster = cbind("Cluster" = cluster.indexes, "e_s" = e_s)
-    cluster.matched = merge(cluster.data, vals.cluster, by = "Cluster")
+    vals.cluster <- cbind(cluster.indexes, "e_s" = e_s)
+    cluster.matched <- merge(cluster.data, vals.cluster, by = cluster.var)
     
     #Creating artificial data
-    
-    data.artificial[,formula.text[2]] = modelo.nulo$fitted.values + 
+    data.artificial[, depvar] <- modelo.nulo$fitted.values + 
       cluster.matched$e_s*modelo.nulo$residuals
     
-    modelo.s = lm(formula, data = data.artificial) 
+    modelo.s <- lm(as.formula(formula), weights = weight.vec, 
+                   data = data.artificial) 
     
-    coef.s = modelo.s$coefficients[coef.to.test]
+    coef.s <- modelo.s$coefficients[coef.to.test]
     
-    vec_unstud = c(vec_unstud, coef.s)
+    vec_unstud <- c(vec_unstud, coef.s)
     
-    se.s = sqrt(diag(vcovCL(modelo.s, cluster = cluster.data[,1])))[coef.to.test]
+    se.s <- sqrt(diag(vcovCL(modelo.s, cluster = cluster.data[,1])))[coef.to.test]
     
-    vec_stud = c(vec_stud,  (coef.s - b)/se.s)
+    vec_stud <- c(vec_stud,  (coef.s - b)/se.s)
   }
   
   #Compute estimates from the data now
-  modelo.data = lm(formula, data = data)
+  modelo.data <- lm(as.formula(formula), weights = weight.vec, data = data)
   
-  coef.data = modelo.data$coefficients[coef.to.test]
+  coef.data <- modelo.data$coefficients[coef.to.test]
   
-  p.val.unstud = 1 - mean(abs(coef.data) > abs(vec_unstud))
-  se.data =  sqrt(diag(vcovCL(modelo.data, cluster = cluster.data[,1])))[coef.to.test]
+  p.val.unstud <- 1 - mean(abs(coef.data) > abs(vec_unstud))
+  se.data <- sqrt(diag(vcovCL(modelo.data, cluster = cluster.data[,1])))[coef.to.test]
   
-  p.val.stud = 1 - mean(abs((coef.data - b)/se.data) > abs(vec_stud))
+  p.val.stud <- 1 - mean(abs((coef.data - b)/se.data) > abs(vec_stud))
   
   return(list("Unstudentized p-value" = p.val.unstud, 
               "Studentized p-value" = p.val.stud))
@@ -350,7 +358,8 @@ wild.bs <- function(formula, coef.to.test, cluster.var, data, b = 0, S = 1000)
 #' @param alpha Significance level, by default 0.05
 #' @param res.samp  Logical describing if residuals from null regression should 
 #' be sampled with replacement to construct simulated residuals, by default False
-#' @param cluster Cluster variable name. Not yet implemented, by default None
+#' @param cluster Cluster variable name. Package fixest must be loaded in order
+#' to use this argument.
 #'
 #' @return Assessment value for the given level of significance.
 #' @export
@@ -421,7 +430,70 @@ ferman_assessment <- function(df, model, assess_on, H0 = 0.0, nsim = 1000, alpha
   return(mean(rejections))
 }
 
-
+# Permutation test - Randomization Inference ------------------------------
+rand_inference <- function(df, model, assess_on, H0 = 0.0, nsim = 1000, 
+                           cluster = NULL, weights = NULL) {
+  stopifnot(is_tibble(df))
+  # No spaces allowed in model formula
+  model <- gsub("\\s+", "", model)
+  depvar <- sub("~.+", "", model)
+  # Weights vector
+  if (!is.null(weights))
+    weights_vec <- df %>% pull(weights)
+  
+  # Regression with original data
+  orig_model <- fixest::feols(as.formula(model), weights = weights_vec, data = df)
+  orig_coef <- orig_model$coefficients[assess_on]
+  if (!is.null(cluster))
+    orig_se <- summary(orig_model, cluster = cluster)$se[assess_on]
+  else
+    orig_se <- summary(orig_model)$se[assess_on]
+  # Original regression test statistic. Studentized
+  orig_test <- abs(orig_coef - H0) / orig_se
+  
+  # Permutations
+  # Clusterized permutations: number of clusters
+  if (!is.null(cluster)) {
+    n_cl <- nrow(unique(df[cluster]))
+  }
+  # Artificial data
+  df_art <- df
+  vec_sim <- vector(mode = "double", length = nsim)
+  for (s in seq_len(nsim)) {
+    if (!is.null(cluster)) {
+      # Sample clusters without replacement
+      cl_shuffle <- sample(n_cl)
+      # Reorder only cluster and treatment
+      cl_sample <- unique(df[cluster])[cl_shuffle, ] %>% 
+        right_join(df[c(cluster, assess_on)], by = cluster)
+      # Replace cluster and treatment without reordering all else!
+      df_art[c(cluster, assess_on)] <- cl_sample
+      # Regression with artificial data
+      art_model <- fixest::feols(as.formula(model), weights = weights_vec, 
+                                 data = df_art)
+      art_coef <- art_model$coefficients[assess_on]
+      art_se <- summary(art_model, cluster = df_art[cluster])$se[assess_on]
+    } # clusterized permutation
+    else {
+      shuffle <- sample(nrow(df))
+      # Reorder treatment
+      tr_sample <- df[shuffle, assess_on]
+      df_art[assess_on] <- tr_sample
+      # Regression with artificial data
+      art_model <- fixest::feols(as.formula(model), weights = weights_vec, 
+                                 data = df_art)
+      art_coef <- art_model$coefficients[assess_on]
+      art_se <- summary(art_model)$se[assess_on]
+    }
+    # Artificial regression test statistic. Studentized
+    art_test <- abs(art_coef - H0) / art_se
+    vec_sim[s] <- art_test
+  } # end of for loop
+  
+  p_val <- 1 - mean(orig_test > vec_sim)
+  return(c(exact_p_val = p_val))
+  
+}
 # Propensity Score --------------------------------------------------------
 
 # Propensity score blocking -----------------------------------------------

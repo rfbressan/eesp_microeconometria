@@ -165,14 +165,14 @@ kbl(manski_tbl1, digits = 4, booktabs = TRUE,
   kable_styling(latex_options = c("HOLD_position"))
 ```
 
-In table \@ref(tab:lower-bound) we have the estimated lower bound for the causal effect and the 5% bootstrap quantile, as in @Manski2000 Table II.
+In table \@ref(tab:lower-bound) we have the estimated lower bound for the causal effect and the 2.5% and 97.5% bootstrap quantiles, as in @Manski2000 Table II.
 
 ```{r lower-bound, results='asis'}
 kbl(manski_tbl2, digits = 4, booktabs = TRUE,
     caption = "Lower bound on years of study for first child.",
-    col.names = c("s", "t", "Estimate", "5% quantile")) %>% 
+    col.names = c("s", "t", "Estimate", "2.5% quant.", "97.5% quant.")) %>% 
   kable_classic(full_width = FALSE) %>% 
-  add_header_above(c(" " = 2, "Lower Bound on Delta(s,t)" = 2)) %>% 
+  add_header_above(c(" " = 2, "Lower Bound on Delta(s,t)" = 3)) %>% 
   kable_styling(latex_options = c("HOLD_position"))
 ```
 
@@ -355,5 +355,12 @@ In the fuzzy regression discontinuity design, one of the assumptions for identif
 This fact would invalidate our running variable as an instrument, and the way to circumvent this would be to choose another variable from the survey to be the instrument. This new variable should attend both the exclusion restriction and be correlated to the probability of being treated (the relevance condition). The later condition can be met by choosing a variable that was significant in the probit model for eligibility.
 
 Also, for the estimation of a RDD, one must always be very careful about the extrapolation needed when utilizing unities that are not exactly at the cutoff value. @Gelman2019 argue that polynomials of order greater than two should not be used in local regressions. High order polynomials are very sensitive to the inclusion of observations and may lead erroneous extrapolation toward the cutoff. We try to avoid this pitfall by using local _linear_ regression and choosing a very tight bandwidth. Also  
+
+\newpage
+### Annex - R Code
+
+```{r annex, code=readLines("homework_I.R"), eval = FALSE, echo=TRUE}
+
+```
 
 ## References
