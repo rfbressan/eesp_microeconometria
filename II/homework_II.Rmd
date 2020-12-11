@@ -24,9 +24,6 @@ bibliography: references.bib
 
 ```{r setup, include=FALSE, message=FALSE, warning=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
-# tex_output <- knitr::is_latex_output()
-# stg_type <- ifelse(tex_output, 'latex', 'html')
-
 # library(data.table)
 library(tidyverse)
 library(kableExtra)
@@ -70,19 +67,73 @@ The causal parameter $\beta$ is identified under the assumption that **potential
 This means that treatment assignment must be independent of potential outcomes, specifically, $E[D_{it}\eta_{it'}]=0$ for all $t$ and $t'$. **Treatment should not be chosen in response** to knowledge about how the outcome is likely to be and also that **outcome should not change in anticipation of treatment**.
 
 SC:
+
+The synthetic control method is mostly used when the units of observation are a small number of aggregate entities and there is one single treated unit, while a combination of untreated units provides a good approximation for the treat unit conterfactual. The formal setup of a SC method may be described as follows. 
+
+We have at disposal observations for $J+1$ units and $j=0$ is our treated unit at times $t>t_0$ and $\mathcal{T}=\{1, \ldots, t_0, \ldots, T\}$. We call the "donor pool" the other untreated units, $j=1,\ldots, J$. We observe an outcome of interest for each unit at every period of time, $y_{jt}$. Suppose the outcome is explainable by a set of $k$ predictor variables, $X_{1j},\ldots, X_{kj}$. We can group the predictors variables for untreated units together and have a $k\times J$ matrix $\mathbf{X_0}$. Let the potential outcome for any unit $j$ without treatment at period $t$ be denoted by $y^N_{jt}$. The treated unit, after period $t_0$ will have suffered intervention, therefore its potential outcome under intervention is the observed outcome, $y^I_{1t}=Y_{1t}$ for $t>t_0$. We define the **effect of the intervention** on the outcome of interest as:
+
+\begin{equation}
+\tau_{1t}=Y^I_{1t}-Y^N_{1t}
+(\#eq:sc-effect)
+\end{equation}
+
+for $t>t_0$. The challenge is to estimate the counterfactual $Y^N_{1t}, t>t_0$.
+
+The SC approach can also be posed as a linear factor model of potential outcomes:
+
+\begin{equation}
+y_{jt}=\begin{cases}
+    y_{jt}^N=c_j+\delta_t+\lambda_t\mu_j+\varepsilon_{jt}, \text{ if }d_{jt}=0\\
+    y_{jt}^I=\alpha_{jt}+y_{jt}^N, \text{ if } d_{jt}=1
+  \end{cases}
+(\#eq:sc-factors)
+\end{equation}
+where $\lambda_t$ is the vector of common factors, $\mu_j$ the factor loadings, $\alpha_{jt}$ is the treatment effect and $\varepsilon_{jt}$ is the idiosyncratic shock. We must notice that common factors and respective loadings are **not observable** and are part of the error structure. The intervention is signaled by $d_{jt}=1$ and happens only when $j=0$ and $t>t_0$.  
  
+The main assumptions are: i) the donor pool members are comparable to the treated unit and were not subject to treatment, and ii) predictors $X_{kj}$ are unaffected by the intervention and iii) the intervention itself is not related to idiosyncratic shocks, $\varepsilon_{jt}$, for every unity and all times.
+
+If these assumptions are met, a synthetic control is defined as a weighted average of the units in the donor pool. Let $\mathbf{W}=(w_1,\ldots,w_{J})'$ be a $J\times 1$ vector of weights with all entries in $[0, 1]$ and sum to one. Given this set of weights we can estimate the counterfactual as:
+
+\begin{align}
+\hat{Y}^N_{1t}&=\sum_{j=2}^{J+1}w_jY_{jt}(\#eq:sc-ycounter)\\
+\hat\tau_{1t}&=Y_{1t}-\hat{Y}^N_{1t}(\#eq:sc-tauhat)
+\end{align}
+
+
+From equation \@ref(eq:sc-ycounter) it is clear how the above assumptions play a role in giving an unbiased estimator for the effect of intervention. The expected value of $\hat{y}^N_{0t}$ must converge to the counterfactual $y^N_{0t}$, that is, the weighted average of synthetic control's outcome must be a good approximation of the treated outcome *had it not been treated*.
+
 
 2. (10 points) Describe settings in which the conditions above would be invalid.
 
 The treatment exogeneity may easily be violated in a DID setup, take for example @Chay2005 who consider a policy in Chile where poorly performing schools were given additional financial resources. The DID estimator compares average school outcomes between treated and control schools before and after the subsidy. It's easy to imagine that due to chance, an above threshold school had a poor performance exactly in the pre-treatment year, inducing this school to the treatment group. After receiving treatment, and suppose the true effect is negligible, the school has a normal performance above threshold as usual. In this case the DID estimator would overestimate the treatment effect in a phenomenon known as Ashenfelter's dip.
 
-In the syntethic control framework, **blablablabla**
+In the synthetic control framework one can think of a donor pool that is not close enough to the treated unit, that is, the treated unit is unique, and even when it had not suffered intervention it had unique characteristics that cannot be obtained by a weight average of all other units. @Abadie2020 presents some conditions on the context of the investigation under which synthetic controls are appropriate, and when it is not. The synthetic control method is not well suited when the outcome is highly volatile with respect to small shock, when the comparison group (i.e. donor pool) is not "free" from a similar shock we are interested and when there are large idiosyncratic shocks that affect their outcome.
+
+Also, the synthetic control method, just like DID, does not hold if there is anticipation of treatment affecting the outcome prior to the intervention. Finally, the no interference, much like the SUTVA, must hold.
 
 3. (10 points) Describe the different alternative inference methods that are available for these two estimators. Be specific about the conditions in which each inference method would be reliable.
 
-Inference in DID estimation is typically carried out through asymptotic approximation. If available, the researcher can also make cluster robust and/or heteroskedasticity robust inference.
+Inference in DID estimation is typically carried out through asymptotic approximation. If available, the researcher can also make cluster robust and/or heteroskedasticity robust inference. Although, this approach is only available if the number of both treated and control units (or clusters) is large. When we have only a handful of treated units, @FermanPinto2019 show the CRVE estimator will underestimate the variance. Wild bootstrap in this framework would not be a good choice either, [@Canay2018].
 
-The synthetic control method is more problematic when it comes to inference. Up until recently there was no analytical, even asymptotic, expressions for standard errors and inference relied on non-parametric methods. **BALBABALBLALBA**
+When the number of treated units is small, but we do have a large number of controls in a DID framework, the method of @Conley2011 is the literature's preferred choice. But, it does come with strings attached. One of the method's assumptions is that errors are iid across unities and independent of treatment assignment, thus eliminating the possibility of heteroskedasticity across treatment and control groups. This assumption may be unrealistic in situation where the observations are aggregated from individual level and there is correlation among same group individuals. @FermanPinto2019 show this leads to a size problem in inference. They suggest an approach that estimates the conditional heteroskedastic variance and then rescales the residuals to apply the bootstrap procedure.
+
+The synthetic control method is more problematic when it comes to inference. Results assessment is usually carried out by visual inspection and placebo tests. @Abadie2010 propose a mode of inference for the synthetic control framework that is based on permutation methods. Their method relies on a test statistic that measures the ratio of the post-intervention fit relative to the pre-intervention fit.
+
+\begin{equation}
+R_{j}\left(t_{1}, t_{2}\right)=\left(\frac{1}{t_{2}-t_{1}+1} \sum_{t=t_{1}}^{t_{2}}\left(Y_{j t}-\widehat{Y}_{j t}^{N}\right)^{2}\right)^{1 / 2}
+(\#eq:rmspe)
+\end{equation}
+
+and the goodness-of-fit ratio is:
+
+\begin{equation}
+r_{j}=\frac{R_{j}\left(T_{0}+1, T\right)}{R_{j}\left(1, T_{0}\right)}
+(\#eq:ratio)
+\end{equation}
+$r_j$ measures the quality of the fit of a synthetic control for unit j in the **post-treatment period**, relative to the quality of the fit in the pre-treatment period. @Abadie2010 use
+the permutation distribution of $r_j$ for inference.
+
+@chernozhukov2020exact develop permutation inference procedures that are valid under weak and easy-to-verify conditions, and are provably robust against misspecification. The methods work in with many different approaches for predicting counterfactual mean outcomes in the absence of the intervention, like synthetic controls, difference-in-differences, etc. The authors draw their method from end-of-sample instability tests and devise a sampling-based inferential procedure for synthetic controls and related methods that employs permutations of regression residuals in the time dimension. The main assumption is errors stationarity and weak dependence on the counterfactual generating process. By imposing the null hypothesis of no intervention effect, a test based on permutations of the residuals, $\hat u_t = Y_{0t}-Y_{t}W^*$ can be carried on.
 
 # Part II
 
@@ -156,7 +207,7 @@ In the next question I will perform the assessment proposed in @Ferman2019 to ha
 5. (30 points) Use the data from the paper to re-analyze the results of the paper. You can, for example, check whether the results are robust to alternative specifications or alternative approaches for inference, you can
 provide some evidence that the assumptions the authors rely on are reasonable or unreasonable, you can check whether the inference method the authors are using is reliable, and so on. Be creative!
 
-First let's replicate the author's main results table:
+The author himself made several specifications to attest robustness and his theoretical findings. First let's replicate the author's main results table:
 
 ```{r etable-setup}
 #' Setup fixest
@@ -187,6 +238,7 @@ etable(tex = TRUE,
        cluster = "state",
        digits = 3,
        title = "The effect of liberalization on local wages",
+       label = "tab:table1",
        drop = "(Intercept)",
        yesNo = "$\\checkmark$",
        subtitles = c("Main", "Main", "No labor", "No labor",
@@ -196,7 +248,7 @@ etable(tex = TRUE,
                         "Labor share adjustment" = labor_checks))
 ```
 
-@Ferman2019 simple inference assessment
+Now that we have the same results as the original paper, we can make an assessment, as in @Ferman2019, to verify the conducted inference's reliability. Table \@ref(tab:ferman) provides the assessment for two different significance levels ($\alpha$ = 5% and 10%). 
 
 ```{r ferman, resutls='asis'}
 kbl(assessment_tbl, digits = 3, booktabs = TRUE,
@@ -206,6 +258,11 @@ kbl(assessment_tbl, digits = 3, booktabs = TRUE,
     escape = FALSE) %>% 
   kable_classic(full_width = FALSE)
 ```
+
+The assessment method is showing that specifications without a state fixed effect are less likely to suffer from overejection for both levels of significance. When state fixed effect is included, the overejection is exacerbated and there are serious concerns about CRVE reliability. As @Ferman2019 alerts, _"If this assessment uncovers a rejection rate significantly larger than the level of the test [...], then this would be a strong indication that the researcher should proceed with caution"_. Therefore, all fixed effect specifications still have rejection rates much higher than the test size and inference based on CRVE for models including fixed effects should be made with caution.
+
+Having this concern in mind, we perform three alternative methods for inference for this particular study, the wild bootstrap, randomization inference and the methods proposed in @Adao2019.
+
 
 ```{r inferences, results='asis'}
 kbl(inferences_df, digits = 4, booktabs = TRUE,
@@ -220,6 +277,25 @@ kbl(inferences_df, digits = 4, booktabs = TRUE,
   add_header_above(c(" " = 2, "Wild Bootstrap" = 2, "RI" = 1, "Adao et. al." = 5))
 ```
 
+Table \@ref(tab:inferences) provides **p-values** for all eight specifications under unstudentized and studentized wild bootstrap, randomization inference and, AKM and AKM0 methods. Homoskedastic, Eicker-Huber-White and CRVE (Region Cluster) are also provided for comparison purposes. Let's take as example the main specification with fixed effects, model number 2. In the original inference, CRVE, this parameter is deemed significant at 1% level, thus a p-value lower than 0.01, and this is indeed the case we found in Table \@ref(tab:inferences). The wild bootstrap method agrees with this value, while randomization inference (Fisher's exact p-value) shows a p-value of 0.021, and when AKM0 is used for inference this p-value jumps to 0.0657.
+
+In general, for this particular paper, even though CRVE seems to be providing underestimated standard errors, especially when state fixed effects are included, the values are not very far from other inference methods and overall I would rather not say the inference is completely off-basis.
+
+A robustness check is carried by introducing the average rate of unemployment in the baseline year of 1991 as a control variable. This data is not present in the original dataset, thus, I collected it from DATASUS and merged it to the data. Results are presented in Table \@ref(tab:robust).
+
+```{r robust, resutls='asis'}
+kbl(robust_df, digits = 4, booktabs = TRUE,
+    caption = "Robustness check introducing average unemployment as control",
+    col.names = c("Estimate", glue::glue("({n})", n = 1:8))) %>% 
+  kable_classic(full_width = FALSE) %>% 
+  add_header_above(c(" " = 1, "Main" = 2, "No labor" = 2, "Nontraded" = 2,
+                     "Workers" = 2)) %>% 
+  pack_rows("Standard Errors", 2, 6)
+  
+```
+
+Table \@ref(tab:robust) shows the point estimate of a regional tariff change is reduced in magnitude but do not change sign. Most of the models do not show statistical significance for this parameter or it is at least reduced when compared to Table \@ref(tab:table1). Specifically for model (2), the paper's main model, CRVE standard error is 0.1779 on an estimate of 0.2461, while AKM standard error is 0.1025. 
+
 \newpage
 ### Annex A - R Code for homework_II.R
 
@@ -233,5 +309,7 @@ kbl(inferences_df, digits = 4, booktabs = TRUE,
 ```{r annex-b, code=readLines("homework_II_census.R"), eval = FALSE, echo=TRUE}
 
 ```
+
+\newpage
 
 ## References

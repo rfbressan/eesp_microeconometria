@@ -18,14 +18,32 @@ library(ShiftShareSE)
 
 #' Part II
 #' Load data
+folder <- "II/input/Kovak2013/AER-2011-0545_data/"
+
 dlnwmmc_mincer <- haven::read_dta("II/input/dlnwmmc_mincer.dta")
 dlnwmmc_mincer_nt <- haven::read_dta("II/input/dlnwmmc_mincer_nt.dta")
 rtc <- haven::read_dta("II/input/rtc.dta")
+microreg_to_mmc <- read_dta(paste0(folder, "microreg_to_mmc.dta")) %>% 
+  as.data.table()
+#' Load DATASUS data on unemployment in 1991
+unemp <- fread("II/input/desemprego1991.csv", sep = ";", encoding = "Latin-1",
+               dec = ",")
+unemp[, `:=`(microreg = as.numeric(str_extract(unemp$`Microrregião IBGE`, "\\d{5}")))]
+unemp <- microreg_to_mmc[unemp, on = "microreg"]
+unemp <- unemp[, .(avg_unemp91 = mean(`Taxa_de_desemprego_16a_e+`, na.rm = TRUE)), 
+               by = "mmc"]
+#' Processed data for SS assessment and Adao et. al inference
+load("II/input/homework_II_Adao.RData")
+
+W_main <- weight_main[, -1]
+W_notheta <- weight_notheta[, -1]
+W_nt <- weight_nt[, -1]
 
 #' Join data, create state fixed effect and drop Manaus
 df <- dlnwmmc_mincer %>% 
   left_join(dlnwmmc_mincer_nt, by = "mmc") %>% 
   left_join(rtc, by = "mmc") %>% 
+  left_join(as_tibble(unemp), by = "mmc") %>% 
   mutate(state = factor(floor(mmc/1000))) %>% 
   filter(mmc != 13007)
 # Embed the weights on the data frame
@@ -73,15 +91,15 @@ reg_workers_fe <- feols(dlnwmmc_mincer_nt~rtc_main|state,
 #' Performs the inference assessment provided in Ferman (2019).
 #'
 #' @param df Your database
-#' @param model A character string in R's formula style defining the unconstrained model.
+#' @param model A character string in R's formula style defining the fixest model.
 #' @param assess_on The variable the assessment will be taken on.
+#' @param W share matrix
 #' @param H0 Coefficient value under the null hypothesis, by default 0.0
 #' @param nsim Number of simulations to run, by default 1000
 #' @param alpha Significance level, by default 0.05
-#' @param res.samp  Logical describing if residuals from null regression should 
-#' be sampled with replacement to construct simulated residuals, by default False
+#' @param weights Weights variable name
 #' @param cluster Cluster variable name. Package fixest must be loaded in order
-#' to use this argument.
+#' to use this argument. It must agree with the cluster provided in the model
 #'
 #' @return Assessment value for the given level of significance.
 #' @export
@@ -89,9 +107,10 @@ reg_workers_fe <- feols(dlnwmmc_mincer_nt~rtc_main|state,
 #' @examples
 #' # NOT RUN
 #' ferman_assessment(iris, "Sepal.Lenght~Sepal.Width+Petal.Width", "Petal.Width")
-ferman_assessment <- function(df, model, assess_on, H0 = 0.0, nsim = 1000, 
-                              alpha = 0.05, res.samp = FALSE, cluster = NULL, 
-                              weights = NULL) {
+# Shift-share Ferman assessment -------------------------------------------
+
+ss_ferman_assessment <- function(data, model, assess_on, W, H0 = 0.0, nsim = 1000, 
+                                 alpha = 0.05, weights = NULL, cluster = NULL) {
   # Coercing df to data.frame ONLY (no tibble or data.table)
   df <- as.data.frame(df)
   # No spaces allowed in model formula
@@ -101,54 +120,36 @@ ferman_assessment <- function(df, model, assess_on, H0 = 0.0, nsim = 1000,
   sim <- seq_len(nsim)
   # Rejections vector (of 0s and 1s)
   rejections <- c()
-  
-  # Step 1: estimate H0 model
-  pattern <- paste0(assess_on, "\\+")
-  null_text <- gsub(pattern, "", model)
-  off <- H0*df[, assess_on]
+  # Regression weights
   weight <- df[, weights]
-  H0fit <- fixest::feols(as.formula(null_text), data = df, offset = off, 
-                         warn = FALSE, weights = weight)
-  # H0fit <- lm(as.formula(null_text), data = df)
-  # Step 2: store the predicted values
-  y_pred <- predict(H0fit)
-  res <- residuals(H0fit)
-  
-  # Step 3: nsim iterations
-  # Step 3.1: draw simulation errors and generate y_sim
+  # Holder for artificial data
+  df_artificial <- df
+  # Iterate nsim simulations
   for (i in sim) {
-    if (res.samp)
-      sim_error <- sample(res, replace = TRUE)
-    else
-      sim_error <- rnorm(length(res))
-    
-    y_sim <- y_pred + sim_error
-    df[, depvar] <- y_sim
-    
-    # Step 3.2: Estimate the unrestricted model for each sim
-    sim_reg <- fixest::feols(as.formula(model), data = df, weights = weight,
-                             warn = FALSE)
-    
-    # Step 3.3: Test the null hypothesis for each sim
-    # Extract all p-values from desired coefficient
+    # Placebo SS regressor
+    df_artificial[, assess_on] <- W %*% rnorm(ncol(W))
+    # Estimate model with placebo SS
+    placebo_fit <- fixest::feols(as.formula(model), data = df_artificial, 
+                                 warn = FALSE, weights = weight)
+    # Reject at specified significance?
     if (is.null(cluster)) {
-      beta <- summary(sim_reg)$coeftable[assess_on, 1]
-      se_beta <- summary(sim_reg)$coeftable[assess_on, 2]
+      beta <- summary(placebo_fit)$coeftable[assess_on, 1]
+      se_beta <- summary(placebo_fit)$coeftable[assess_on, 2]
       tstat <- abs((beta - H0)/se_beta)
     }
     else {
       # fixest must be loaded in order to clusters work!
-      beta <- summary(sim_reg, cluster = cluster)$coeftable[assess_on, 1]
-      se_beta <- summary(sim_reg, cluster = cluster)$coeftable[assess_on, 2]
+      beta <- summary(placebo_fit, cluster = cluster)$coeftable[assess_on, 1]
+      se_beta <- summary(placebo_fit, cluster = cluster)$coeftable[assess_on, 2]
       tstat <- abs((beta - H0)/se_beta)
     }
     # Test whether pvals < alpha and store in rejections
     rejections[i] <- ifelse(tstat > qnorm(1 - alpha/2), 1, 0)
   }
-  
   # Return the mean of rejections
   return(mean(rejections))
 }
+
 
 #' Assessment on main model without fixed effects
 base_df <- tibble(name = c("Main", "Main FE", "No labor", "No labor FE",
@@ -167,11 +168,15 @@ assessment_df <- base_df %>%
                    "dlnwmmc_mincer~rtc_nt|state",
                    "dlnwmmc_mincer_nt~rtc_main",
                    "dlnwmmc_mincer_nt~rtc_main|state"),
+         W_mat = list(W_main, W_main, W_notheta, W_notheta, W_nt, W_nt,
+                      W_main, W_main),
          alpha = list(c(0.05, 0.10))) %>% 
   unnest(cols = alpha) %>% 
-  rowwise() %>% 
-  mutate(assessment = ferman_assessment(df, model, assess_on, cluster = cluster,
-                                        weights = weights, alpha = alpha))
+  rowwise() %>%
+  mutate(assessment = ss_ferman_assessment(df, model, assess_on, W_mat,
+                                           cluster = cluster, weights = weights,
+                                           alpha = alpha))
+
 assessment_tbl <- assessment_df %>% 
   select(name, alpha, assessment) %>% 
   pivot_wider(id_cols = name, names_from = alpha, values_from = assessment)
@@ -208,14 +213,14 @@ wild.bs <- function(data, formula, coef.to.test, cluster.var, weight.var = NULL,
   
   cluster.indexes <- unique(cluster.data)
   
-  C <- length(cluster.indexes)
+  C <- nrow(cluster.indexes)
   
   vec_unstud <- c()
   vec_stud <- c()
   
   data.artificial <- data
   
-  for (s in seq_len(S))
+  for (s in 1:S)
   {
     e_s = 1 - 2*rbinom(C, 1, 0.5)
     
@@ -231,9 +236,10 @@ wild.bs <- function(data, formula, coef.to.test, cluster.var, weight.var = NULL,
     
     coef.s <- modelo.s$coefficients[coef.to.test]
     
-    vec_unstud <- c(vec_unstud, coef.s)
+    vec_unstud <- c(vec_unstud, coef.s - b)
     
-    se.s <- sqrt(diag(vcovCL(modelo.s, cluster = cluster.data[,1])))[coef.to.test]
+    se.s <- sqrt(
+      diag(sandwich::vcovCL(modelo.s, cluster = cluster.data[,1])))[coef.to.test]
     
     vec_stud <- c(vec_stud,  (coef.s - b)/se.s)
   }
@@ -243,8 +249,9 @@ wild.bs <- function(data, formula, coef.to.test, cluster.var, weight.var = NULL,
   
   coef.data <- modelo.data$coefficients[coef.to.test]
   
-  p.val.unstud <- 1 - mean(abs(coef.data) > abs(vec_unstud))
-  se.data <- sqrt(diag(vcovCL(modelo.data, cluster = cluster.data[,1])))[coef.to.test]
+  p.val.unstud <- 1 - mean(abs(coef.data - b) > abs(vec_unstud))
+  se.data <- sqrt(
+    diag(sandwich::vcovCL(modelo.data, cluster = cluster.data[,1])))[coef.to.test]
   
   p.val.stud <- 1 - mean(abs((coef.data - b)/se.data) > abs(vec_stud))
   
@@ -344,12 +351,6 @@ ri_df <- base_df %>%
                                    weights = weights))
 
 # Adao confidence interval ----------------------------------------------------
-load("II/input/homework_II_Adao.RData")
-
-W_main <- weight_main[, -1]
-W_notheta <- weight_notheta[, -1]
-W_nt <- weight_nt[, -1]
-
 adao1 <- reg_ss("dlnwmmc_mincer~1", X = rtc_main , W = W_main, 
                 weights = weights,
                 region_cvar = state,
@@ -389,7 +390,61 @@ adao_df <- base_df %>%
   mutate(methods = list(names(adao_pval))) %>%  
   unnest(cols = c(adao_pval, methods)) %>% 
   select(name, adao_pval, methods) %>% 
-  pivot_wider(names_from = methods, values_from = adao_pval)
+  pivot_wider(names_from = methods, values_from = adao_pval) %>% 
+  rename(Homo = Homoscedastic)
+
+# Borusyak Hull Jaravel inference -----------------------------------------
+source("II/BorusyakHullJaravel.R")
+
+bhj_ivreg_ss("dlnwmmc_mincer~state|rtc_main", X = rtc_main , W = W_main, 
+             weights = weights,
+             region_cvar = state,
+             method = "all", data = df)
+
+# Robustness specs --------------------------------------------------------
+unemp_main <- reg_ss("dlnwmmc_mincer~avg_unemp91", X = rtc_main , W = W_main, 
+                     weights = weights,
+                     region_cvar = state,
+                     method = "all", data = df)
+unemp_main_fe <- reg_ss("dlnwmmc_mincer~avg_unemp91+state", X = rtc_main , 
+                        W = W_main, 
+                        weights = weights,
+                        region_cvar = state,
+                        method = "all", data = df)
+unemp_nolab <- reg_ss("dlnwmmc_mincer~avg_unemp91", X = rtc_notheta , W = W_notheta, 
+                      weights = weights,
+                      region_cvar = state,
+                      method = "all", data = df)
+unemp_nolab_fe <- reg_ss("dlnwmmc_mincer~avg_unemp91+state", X = rtc_notheta , W = W_notheta, 
+                         weights = weights,
+                         region_cvar = state,
+                         method = "all", data = df)
+unemp_notrad <- reg_ss("dlnwmmc_mincer~avg_unemp91", X = rtc_nt , W = W_nt, 
+                       weights = weights,
+                       region_cvar = state,
+                       method = "all", data = df)
+unemp_notrad_fe <- reg_ss("dlnwmmc_mincer~avg_unemp91+state", X = rtc_nt , W = W_nt, 
+                          weights = weights,
+                          region_cvar = state,
+                          method = "all", data = df)
+unemp_workers <- reg_ss("dlnwmmc_mincer_nt~avg_unemp91", X = rtc_main , W = W_main, 
+                        weights = weights_nt,
+                        region_cvar = state,
+                        method = "all", data = df)
+unemp_workers_fe <- reg_ss("dlnwmmc_mincer_nt~avg_unemp91+state", X = rtc_main , W = W_main, 
+                           weights = weights_nt,
+                           region_cvar = state,
+                           method = "all", data = df)
+robust_df <- tibble(description = c("Regional tariff change", names(unemp_main$se)),
+                    main = c(unemp_main$beta, unemp_main$se),
+                    main_fe = c(unemp_main_fe$beta, unemp_main_fe$se),
+                    nolab = c(unemp_nolab$beta, unemp_nolab$se),
+                    nolab_fe = c(unemp_nolab_fe$beta, unemp_nolab_fe$se),
+                    notrad = c(unemp_notrad$beta, unemp_notrad$se),
+                    notrad_fe = c(unemp_notrad_fe$beta, unemp_notrad_fe$se),
+                    workers = c(unemp_workers$beta, unemp_workers$se),
+                    workers_fe = c(unemp_workers_fe$beta, unemp_workers_fe$se))
+
 
 inferences_df <- wild_df %>% 
   select(name, contains("p.value")) %>% 

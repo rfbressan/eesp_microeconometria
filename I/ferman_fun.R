@@ -249,6 +249,48 @@ fe_ferman_ass <- function(data, H0form, Uncform, assess_on, nsim = 1000, alpha =
   return(mean(rejections))
 }
 
+# Shift-share Ferman assessment -------------------------------------------
+
+ss_ferman_assessment <- function(data, model, assess_on, W, H0 = 0.0, nsim = 1000, 
+                          alpha = 0.05, weights = NULL, cluster = NULL) {
+  # Coercing df to data.frame ONLY (no tibble or data.table)
+  df <- as.data.frame(df)
+  # No spaces allowed in model formula
+  model <- gsub("\\s+", "", model)
+  depvar <- sub("~.+", "", model)
+  # Simulations sequence
+  sim <- seq_len(nsim)
+  # Rejections vector (of 0s and 1s)
+  rejections <- c()
+  # Regression weights
+  weight <- df[, weights]
+  # Holder for artificial data
+  df_artificial <- df
+  # Iterate nsim simulations
+  for (i in sim) {
+    # Placebo SS regressor
+    df_artificial[, assess_on] <- W %*% rnorm(ncol(W_main))
+    # Estimate model with placebo SS
+    placebo_fit <- fixest::feols(as.formula(model), data = df_artificial, 
+                                 warn = FALSE, weights = weight)
+    # Reject at specified significance?
+    if (is.null(cluster)) {
+      beta <- summary(placebo_fit)$coeftable[assess_on, 1]
+      se_beta <- summary(placebo_fit)$coeftable[assess_on, 2]
+      tstat <- abs((beta - H0)/se_beta)
+    }
+    else {
+      # fixest must be loaded in order to clusters work!
+      beta <- summary(placebo_fit, cluster = cluster)$coeftable[assess_on, 1]
+      se_beta <- summary(placebo_fit, cluster = cluster)$coeftable[assess_on, 2]
+      tstat <- abs((beta - H0)/se_beta)
+    }
+    # Test whether pvals < alpha and store in rejections
+    rejections[i] <- ifelse(tstat > qnorm(1 - alpha/2), 1, 0)
+  }
+  # Return the mean of rejections
+  return(mean(rejections))
+  }
 
 
 #Function that computes MDE for bilateral test -----------------------------
@@ -303,7 +345,7 @@ wild.bs <- function(data, formula, coef.to.test, cluster.var, weight.var = NULL,
   
   cluster.indexes <- unique(cluster.data)
   
-  C <- length(cluster.indexes)
+  C <- nrow(cluster.indexes)
   
   vec_unstud <- c()
   vec_stud <- c()
@@ -326,9 +368,10 @@ wild.bs <- function(data, formula, coef.to.test, cluster.var, weight.var = NULL,
     
     coef.s <- modelo.s$coefficients[coef.to.test]
     
-    vec_unstud <- c(vec_unstud, coef.s)
+    vec_unstud <- c(vec_unstud, coef.s - b)
     
-    se.s <- sqrt(diag(vcovCL(modelo.s, cluster = cluster.data[,1])))[coef.to.test]
+    se.s <- sqrt(
+      diag(sandwich::vcovCL(modelo.s, cluster = cluster.data[,1])))[coef.to.test]
     
     vec_stud <- c(vec_stud,  (coef.s - b)/se.s)
   }
@@ -338,13 +381,14 @@ wild.bs <- function(data, formula, coef.to.test, cluster.var, weight.var = NULL,
   
   coef.data <- modelo.data$coefficients[coef.to.test]
   
-  p.val.unstud <- 1 - mean(abs(coef.data) > abs(vec_unstud))
-  se.data <- sqrt(diag(vcovCL(modelo.data, cluster = cluster.data[,1])))[coef.to.test]
+  p.val.unstud <- 1 - mean(abs(coef.data - b) > abs(vec_unstud))
+  se.data <- sqrt(
+    diag(sandwich::vcovCL(modelo.data, cluster = cluster.data[,1])))[coef.to.test]
   
   p.val.stud <- 1 - mean(abs((coef.data - b)/se.data) > abs(vec_stud))
   
-  return(list("Unstudentized p-value" = p.val.unstud, 
-              "Studentized p-value" = p.val.stud))
+  return(data.frame("Unstudentized p-value" = p.val.unstud, 
+                    "Studentized p-value" = p.val.stud))
 }
 
 
