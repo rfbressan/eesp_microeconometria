@@ -23,7 +23,7 @@ folder <- "II/input/Kovak2013/AER-2011-0545_data/"
 dlnwmmc_mincer <- haven::read_dta("II/input/dlnwmmc_mincer.dta")
 dlnwmmc_mincer_nt <- haven::read_dta("II/input/dlnwmmc_mincer_nt.dta")
 rtc <- haven::read_dta("II/input/rtc.dta")
-microreg_to_mmc <- read_dta(paste0(folder, "microreg_to_mmc.dta")) %>% 
+microreg_to_mmc <- haven::read_dta(paste0(folder, "microreg_to_mmc.dta")) %>% 
   as.data.table()
 #' Load DATASUS data on unemployment in 1991
 unemp <- fread("II/input/desemprego1991.csv", sep = ";", encoding = "Latin-1",
